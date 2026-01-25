@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+def _format_deploy_tag(dt: datetime) -> str:
+    return f"{dt.year % 100:02d}{dt.month:02d}{dt.day:02d}{dt.hour:02d}{dt.minute:02d}"
 
 
 class Settings(BaseModel):
@@ -79,6 +84,12 @@ class Settings(BaseModel):
     # --- Logging ---
     log_level: str = Field(default="INFO")
     disable_docs: bool = Field(default=True)
+
+    # --- Deploy metadata ---
+    deploy_tag: str = Field(
+        default_factory=lambda: _format_deploy_tag(datetime.now(timezone.utc)),
+        description="Kód nasazení backendu (YYMMDDHHMM).",
+    )
 
     def ensure_canonical_domain(self) -> None:
         # Hard guard: forbid the incorrect domain anywhere in runtime config.
@@ -182,6 +193,10 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
         instance_token_length=int(os.getenv("DAGMAR_INSTANCE_TOKEN_LENGTH", "48")),
         log_level=os.getenv("DAGMAR_LOG_LEVEL", "INFO"),
         disable_docs=os.getenv("DAGMAR_DISABLE_DOCS", "true").lower() == "true",
+        deploy_tag=os.getenv(
+            "DAGMAR_DEPLOY_TAG",
+            _format_deploy_tag(datetime.now(timezone.utc)),
+        ),
     )
 
     settings.ensure_canonical_domain()

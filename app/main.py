@@ -90,6 +90,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, Any]:
         return {"ok": True}
 
+    @app.get("/api/version", include_in_schema=False)
+    async def version() -> dict[str, Any]:
+        return {
+            "backend_deploy_tag": settings.deploy_tag,
+            "environment": settings.environment,
+        }
+
     # Routers already carry full prefixes ("/api/v1/..."), so include without extra prefixes
     # to avoid duplicate paths like "/api/v1/api/v1/...".
     app.include_router(instances_router)
