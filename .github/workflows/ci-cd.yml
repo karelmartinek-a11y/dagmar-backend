@@ -1,0 +1,51 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+      - name: Syntax check
+        run: python -m compileall app
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASS }}
+          script: |
+            set -e
+            if [ ! -d /srv/hcas/_repos/dagmar-backend/.git ]; then
+              git clone https://github.com/karelmartinek-a11y/dagmar-backend.git /srv/hcas/_repos/dagmar-backend
+            fi
+            cd /srv/hcas/_repos/dagmar-backend
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+            rsync -a --delete --exclude='.git' /srv/hcas/_repos/dagmar-backend/ /opt/dagmar/backend/
+            if [ ! -d /opt/dagmar/backend/.venv ]; then
+              python3 -m venv /opt/dagmar/backend/.venv
+            fi
+            /opt/dagmar/backend/.venv/bin/pip install --upgrade pip
+            /opt/dagmar/backend/.venv/bin/pip install /opt/dagmar/backend
+            chown -R dagmar:dagmar /opt/dagmar/backend
+            systemctl restart dagmar-backend
+            cd /opt/dagmar/sandbox && ./run-tests.sh
+            printf '%s DAGMAR backend: auto-deploy main\n' \"$(date '+%F %T')\" >> /var/log/dagmar/deploy.log
