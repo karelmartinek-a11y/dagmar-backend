@@ -117,7 +117,8 @@ def register_instance(
         if not reusable.employment_template:
             reusable.employment_template = EmploymentTemplate.DPP_DPC.value
         if display_name:
-            reusable.display_name = reusable.display_name or display_name
+            # Always update na nejnovější jméno od klienta (uživatel může opravit).
+            reusable.display_name = display_name
         if payload.device_info:
             reusable.device_info_json = json.dumps(payload.device_info)
         db.add(reusable)
@@ -161,8 +162,10 @@ def get_status(instance_id: str, request: Request, response: Response, db: Sessi
 
     # ACTIVE
     if not inst.display_name:
-        # Defensive: ACTIVE without display_name shouldn't happen.
-        return InstanceStatusOutPending(status="PENDING")
+        # Defensive: ACTIVE bez jména -> doplníme náhradní label a pustíme dál.
+        inst.display_name = f"Zařízení {inst.id[:8]}"
+        db.add(inst)
+        db.commit()
 
     settings = _get_settings(db)
     return InstanceStatusOutActive(
