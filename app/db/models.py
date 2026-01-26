@@ -7,7 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
-    ForeignKey,
+    ForeignKey, UniqueConstraint,
     Index,
     Integer,
     String,
@@ -52,6 +52,8 @@ class Instance(Base):
         Enum(InstanceStatus, name="instance_status"), nullable=False, default=InstanceStatus.PENDING
     )
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    shift_plans = relationship("ShiftPlan", back_populates="instance", cascade="all, delete-orphan")
+    shift_plan_month_instances = relationship("ShiftPlanMonthInstance", back_populates="instance", cascade="all, delete-orphan")
 
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -107,6 +109,36 @@ class Attendance(Base):
     __table_args__ = (
         UniqueConstraint("instance_id", "date", name="uq_attendance_instance_date"),
         Index("ix_attendance_instance_date", "instance_id", "date"),
+
+
+class ShiftPlan(Base):
+    __tablename__ = "shift_plan"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instance_id = Column(String, ForeignKey("instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    arrival_time = Column(String, nullable=True)
+    departure_time = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    instance = relationship("Instance", back_populates="shift_plans")
+
+    __table_args__ = (UniqueConstraint("instance_id", "date", name="uq_shift_plan_instance_date"),)
+
+
+class ShiftPlanMonthInstance(Base):
+    __tablename__ = "shift_plan_month_instances"
+
+    id = Column(Integer, primary_key=True, index=True)
+    year = Column(Integer, nullable=False, index=True)
+    month = Column(Integer, nullable=False, index=True)
+    instance_id = Column(String, ForeignKey("instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    instance = relationship("Instance", back_populates="shift_plan_month_instances")
+
+    __table_args__ = (UniqueConstraint("year", "month", "instance_id", name="uq_shift_plan_month_instance"),)
     )
 
 

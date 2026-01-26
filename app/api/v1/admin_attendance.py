@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
-from app.db.models import Attendance, AttendanceLock, Instance
+from app.db.models import Attendance, AttendanceLock, Instance, ShiftPlan
 from app.db.session import get_db
 from app.security.csrf import require_csrf
 from app.utils.timeparse import parse_hhmm_or_none, parse_yyyy_mm_dd
@@ -21,6 +21,8 @@ class AttendanceDayOut(BaseModel):
     date: str
     arrival_time: Optional[str] = None
     departure_time: Optional[str] = None
+    planned_arrival_time: Optional[str] = None
+    planned_departure_time: Optional[str] = None
 
 
 class AttendanceMonthOut(BaseModel):
@@ -80,15 +82,26 @@ def admin_get_month_attendance(
 
     by_date: dict[dt.date, Attendance] = {r.date: r for r in rows}
 
+    plan_rows = db.execute(
+        select(ShiftPlan)
+        .where(ShiftPlan.instance_id == inst.id)
+        .where(ShiftPlan.date >= start)
+        .where(ShiftPlan.date < end)
+    ).scalars().all()
+    plan_by_date: dict[dt.date, ShiftPlan] = {r.date: r for r in plan_rows}
+
     days: list[AttendanceDayOut] = []
     cur = start
     while cur < end:
         r = by_date.get(cur)
+        p = plan_by_date.get(cur)
         days.append(
             AttendanceDayOut(
                 date=cur.isoformat(),
                 arrival_time=r.arrival_time if r else None,
                 departure_time=r.departure_time if r else None,
+                planned_arrival_time=p.arrival_time if p else None,
+                planned_departure_time=p.departure_time if p else None,
             )
         )
         cur = cur + dt.timedelta(days=1)
