@@ -94,6 +94,8 @@ def register_instance(
     display_name = payload.display_name.strip() if payload.display_name else None
     if payload.display_name is not None and not display_name:
         raise HTTPException(status_code=400, detail="display_name required")
+    if display_name is None:
+        raise HTTPException(status_code=400, detail="display_name required")
 
     rows = (
         db.execute(
