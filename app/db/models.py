@@ -109,36 +109,49 @@ class Attendance(Base):
     __table_args__ = (
         UniqueConstraint("instance_id", "date", name="uq_attendance_instance_date"),
         Index("ix_attendance_instance_date", "instance_id", "date"),
+    )
 
 
 class ShiftPlan(Base):
     __tablename__ = "shift_plan"
 
-    id = Column(Integer, primary_key=True, index=True)
-    instance_id = Column(String, ForeignKey("instances.id", ondelete="CASCADE"), nullable=False, index=True)
-    date = Column(Date, nullable=False, index=True)
-    arrival_time = Column(String, nullable=True)
-    departure_time = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False
+    )
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    arrival_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    departure_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, onupdate=func.now())
 
-    instance = relationship("Instance", back_populates="shift_plans")
+    instance: Mapped[Instance] = relationship("Instance", back_populates="shift_plans")
 
-    __table_args__ = (UniqueConstraint("instance_id", "date", name="uq_shift_plan_instance_date"),)
+    __table_args__ = (
+        UniqueConstraint("instance_id", "date", name="uq_shift_plan_instance_date"),
+        Index("ix_shift_plan_instance_id", "instance_id"),
+        Index("ix_shift_plan_date", "date"),
+    )
 
 
 class ShiftPlanMonthInstance(Base):
     __tablename__ = "shift_plan_month_instances"
 
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    month = Column(Integer, nullable=False, index=True)
-    instance_id = Column(String, ForeignKey("instances.id", ondelete="CASCADE"), nullable=False, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    instance_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    instance = relationship("Instance", back_populates="shift_plan_month_instances")
+    instance: Mapped[Instance] = relationship("Instance", back_populates="shift_plan_month_instances")
 
-    __table_args__ = (UniqueConstraint("year", "month", "instance_id", name="uq_shift_plan_month_instance"),)
+    __table_args__ = (
+        UniqueConstraint("year", "month", "instance_id", name="uq_shift_plan_month_instance"),
+        Index("ix_shift_plan_month_instances_year", "year"),
+        Index("ix_shift_plan_month_instances_month", "month"),
+        Index("ix_shift_plan_month_instances_instance_id", "instance_id"),
     )
 
 
