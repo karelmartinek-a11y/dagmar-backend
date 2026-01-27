@@ -81,21 +81,36 @@ def admin_get_shift_plan_month(
     _admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> ShiftPlanMonthOut:
+    # Aktivní instance chceme vrátit i tehdy, když tabulky plánů chybí (aby UI mělo aspoň seznam).
     try:
-        return _admin_get_shift_plan_month_impl(db=db, year=year, month=month)
+        active_instances = db.execute(
+            select(Instance)
+            .where(Instance.status == InstanceStatus.ACTIVE)
+            .order_by(Instance.display_name.asc(), Instance.created_at.asc())
+        ).scalars().all()
+    except SQLAlchemyError as e:
+        logging.getLogger(__name__).warning("Instance query failed: %s", e)
+        active_instances = []
+
+    try:
+        return _admin_get_shift_plan_month_impl(db=db, year=year, month=month, active_instances=active_instances)
     except SQLAlchemyError as e:
         logging.getLogger(__name__).warning("Shift plan tables unavailable: %s", e)
-        return ShiftPlanMonthOut(year=year, month=month, selected_instance_ids=[], active_instances=[], rows=[])
+        active_out = [
+            ActiveInstanceOut(id=i.id, display_name=i.display_name, employment_template=i.employment_template) for i in active_instances
+        ]
+        return ShiftPlanMonthOut(year=year, month=month, selected_instance_ids=[], active_instances=active_out, rows=[])
 
 
-def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int) -> ShiftPlanMonthOut:
+def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int, active_instances=None) -> ShiftPlanMonthOut:
     start, end = _month_range(year, month)
 
-    active_instances = db.execute(
-        select(Instance)
-        .where(Instance.status == InstanceStatus.ACTIVE)
-        .order_by(Instance.display_name.asc(), Instance.created_at.asc())
-    ).scalars().all()
+    if active_instances is None:
+        active_instances = db.execute(
+            select(Instance)
+            .where(Instance.status == InstanceStatus.ACTIVE)
+            .order_by(Instance.display_name.asc(), Instance.created_at.asc())
+        ).scalars().all()
 
     active_out = [
         ActiveInstanceOut(id=i.id, display_name=i.display_name, employment_template=i.employment_template) for i in active_instances
