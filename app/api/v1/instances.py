@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app.db.models import AppSettings, EmploymentTemplate, Instance, InstanceStatus
 from app.security.rate_limit import rate_limit
-from app.security.tokens import issue_instance_token_once
+from app.security.tokens import issue_instance_token_once, rotate_instance_token
 
 router = APIRouter(prefix="/api/v1/instances", tags=["instances"])
 
@@ -204,16 +204,10 @@ def claim_token(instance_id: str, request: Request, response: Response, db: Sess
         db.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Instance misconfigured")
 
-    # Issue token only once; return existing token is NOT possible because we store only hash.
-    # Therefore: we store token plaintext only transiently at issuance time and return it.
-    # Subsequent calls will return 409 to force client to keep the token.
+    # Issue token (rotating if already issued) so že klient může token znovu získat po ztrátě.
     token = issue_instance_token_once(db, inst)
-    db.commit()
-
     if token is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Token already claimed. Keep the existing token on the client.",
-        )
+        token = rotate_instance_token(db, inst)
+    db.commit()
 
     return ClaimTokenOut(instance_token=token, display_name=inst.display_name)

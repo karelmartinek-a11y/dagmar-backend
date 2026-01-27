@@ -154,3 +154,13 @@ def issue_instance_token_once(db, instance: models.Instance) -> Optional[str]:
     instance.token_issued_at = datetime.now(timezone.utc)
     db.add(instance)
     return token
+
+
+def rotate_instance_token(db, instance: models.Instance) -> str:
+    """Issue a fresh token even if one already exists (rotates/invalidates previous token)."""
+    token = generate_instance_token()
+    rec = make_token_record(token)
+    instance.token_hash = rec.token_hash
+    instance.token_issued_at = datetime.now(timezone.utc)
+    db.add(instance)
+    return token
