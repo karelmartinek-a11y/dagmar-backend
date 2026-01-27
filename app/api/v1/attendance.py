@@ -28,6 +28,7 @@ class AttendanceDayOut(BaseModel):
 
 class AttendanceMonthOut(BaseModel):
     days: list[AttendanceDayOut]
+    instance_display_name: str
 
 
 class AttendanceUpsertIn(BaseModel):
@@ -116,7 +117,9 @@ def get_month_attendance(
         )
         cur = cur + dt.timedelta(days=1)
 
-    return AttendanceMonthOut(days=days)
+    display_name = inst.display_name or f"Zařízení {inst.id[:8]}"
+
+    return AttendanceMonthOut(days=days, instance_display_name=display_name)
 
 
 def _ensure_shift_plan_tables(db: Session) -> None:
