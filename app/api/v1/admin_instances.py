@@ -218,7 +218,6 @@ def delete_instance(
 def delete_pending_instances(
     _admin: Annotated[dict, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
-    _: None = Depends(require_csrf),
 ):
     pending = db.scalars(select(Instance).where(Instance.status == InstanceStatus.PENDING)).all()
     deleted = 0
