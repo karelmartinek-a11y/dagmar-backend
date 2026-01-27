@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
@@ -82,13 +84,18 @@ def admin_get_month_attendance(
 
     by_date: dict[dt.date, Attendance] = {r.date: r for r in rows}
 
-    plan_rows = db.execute(
-        select(ShiftPlan)
-        .where(ShiftPlan.instance_id == inst.id)
-        .where(ShiftPlan.date >= start)
-        .where(ShiftPlan.date < end)
-    ).scalars().all()
-    plan_by_date: dict[dt.date, ShiftPlan] = {r.date: r for r in plan_rows}
+    plan_by_date: dict[dt.date, ShiftPlan] = {}
+    try:
+        plan_rows = db.execute(
+            select(ShiftPlan)
+            .where(ShiftPlan.instance_id == inst.id)
+            .where(ShiftPlan.date >= start)
+            .where(ShiftPlan.date < end)
+        ).scalars().all()
+        plan_by_date = {r.date: r for r in plan_rows}
+    except SQLAlchemyError as e:
+        # Pokud chybí tabulka shift_plan (např. neproběhla migrace), nepadáme na 500 a jen vrátíme docházku bez plánů.
+        logging.getLogger(__name__).warning("ShiftPlan unavailable, skipping planned times: %s", e)
 
     days: list[AttendanceDayOut] = []
     cur = start
@@ -106,16 +113,20 @@ def admin_get_month_attendance(
         )
         cur = cur + dt.timedelta(days=1)
 
-    locked = (
-        db.execute(
-            select(AttendanceLock).where(
-                AttendanceLock.instance_id == inst.id,
-                AttendanceLock.year == year,
-                AttendanceLock.month == month,
-            )
-        ).scalar_one_or_none()
-        is not None
-    )
+    locked = False
+    try:
+        locked = (
+            db.execute(
+                select(AttendanceLock).where(
+                    AttendanceLock.instance_id == inst.id,
+                    AttendanceLock.year == year,
+                    AttendanceLock.month == month,
+                )
+            ).scalar_one_or_none()
+            is not None
+        )
+    except SQLAlchemyError as e:
+        logging.getLogger(__name__).warning("AttendanceLock unavailable, treating as unlocked: %s", e)
 
     return AttendanceMonthOut(days=days, locked=locked)
 
