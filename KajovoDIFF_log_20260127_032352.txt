@@ -1,0 +1,4 @@
+[2026-01-27 03:23:52] START: patch=C:\Users\provo\Downloads\DAGBAC.DIFF target=C:\GitHub\dagmar-backend
+[2026-01-27 03:23:52] Detekce kořene patch: strip_count=0 (scores={0: 0, 1: 0, 2: 0, 3: 0}).
+[2026-01-27 03:23:52] INFO: žádné hunks pro src/main/resources/static/swagger-ui/dagmar-swagger.css (přeskakuji).
+[2026-01-27 03:23:52] DONE: {'files_total': 1, 'files_changed': 0, 'files_created': 0, 'files_deleted': 0, 'files_skipped_binary': 0, 'errors': 0, 'hunks_applied': 0}
