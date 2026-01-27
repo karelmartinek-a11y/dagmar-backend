@@ -141,6 +141,11 @@ def extract_csrf_token(
     if csrf_header:
         return csrf_header.strip()
 
+    # Fallback: cookie set by csrf_issue_token (SPA může nepředat header).
+    cookie_val = request.cookies.get("dagmar_csrf_token")
+    if cookie_val:
+        return cookie_val.strip()
+
     # For classic HTML forms (admin UI), accept csrf_token form field.
     # Note: reading form requires async; thus this is used only in dependency below.
     return None
