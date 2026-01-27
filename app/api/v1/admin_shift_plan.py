@@ -6,12 +6,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, inspect
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
-from app.db.models import Instance, InstanceStatus, ShiftPlan, ShiftPlanMonthInstance
+from app.db.models import Base, Instance, InstanceStatus, ShiftPlan, ShiftPlanMonthInstance
 from app.db.session import get_db
 from app.security.csrf import require_csrf
 from app.utils.timeparse import parse_hhmm_or_none, parse_yyyy_mm_dd
@@ -102,7 +102,23 @@ def admin_get_shift_plan_month(
         return ShiftPlanMonthOut(year=year, month=month, selected_instance_ids=[], active_instances=active_out, rows=[])
 
 
+def _ensure_shift_plan_tables(db: Session) -> None:
+    try:
+        bind = db.get_bind()
+        insp = inspect(bind)
+        missing = []
+        if not insp.has_table("shift_plan"):
+            missing.append(ShiftPlan.__table__)
+        if not insp.has_table("shift_plan_month_instances"):
+            missing.append(ShiftPlanMonthInstance.__table__)
+        if missing:
+            Base.metadata.create_all(bind=bind, tables=missing)
+    except Exception as e:
+        logging.getLogger(__name__).warning("Unable to ensure shift plan tables: %s", e)
+
+
 def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int, active_instances=None) -> ShiftPlanMonthOut:
+    _ensure_shift_plan_tables(db)
     start, end = _month_range(year, month)
 
     if active_instances is None:
@@ -183,6 +199,7 @@ def admin_upsert_shift_plan(
 
 
 def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut:
+    _ensure_shift_plan_tables(db)
     inst = db.get(Instance, body.instance_id)
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
@@ -238,6 +255,7 @@ def admin_set_shift_plan_selection(
 
 
 def _admin_set_shift_plan_selection_impl(db: Session, body: ShiftPlanSelectionIn) -> OkOut:
+    _ensure_shift_plan_tables(db)
     # Keep order, remove duplicates & empties.
     uniq: list[str] = []
     seen: set[str] = set()
