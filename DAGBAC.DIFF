@@ -1,0 +1,62 @@
+# DAGBAC.DIFF
+# Poznámka: v této konverzaci nemám přístup k repozitáři dagmar-backend (není v aktuálním výběru GitHub repo konektoru),
+# takže nemohu bezpečně vytvořit patch proti konkrétním souborům (musel bych hádat framework i cesty).
+#
+# Níže je připravená "template" úprava pro 2 nejběžnější varianty, abys to mohl(a) jen dosadit do skutečných cest.
+# Jakmile bude dagmar-backend dostupný v konektoru, mohu ti vygenerovat přesný diff proti reálným souborům.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Varianta A: Spring Boot + springdoc-openapi (Swagger UI)
+# ─────────────────────────────────────────────────────────────────────────────
+# 1) Přidej CSS do statics:
+#   src/main/resources/static/swagger-ui/dagmar-swagger.css
+#
+# 2) V application.yml (nebo application.properties) nastav:
+#   springdoc:
+#     swagger-ui:
+#       customCssUrl: /swagger-ui/dagmar-swagger.css
+#
+# 3) (Volitelné) nastav title/logo přes index.html override, pokud používáš springdoc index transformer.
+
+diff --git a/src/main/resources/static/swagger-ui/dagmar-swagger.css b/src/main/resources/static/swagger-ui/dagmar-swagger.css
+new file mode 100644
+--- /dev/null
++++ b/src/main/resources/static/swagger-ui/dagmar-swagger.css
++/* DAGMAR Swagger UI skin (logo-driven palette) */
++:root{
++  --dg-ink:#05243a;
++  --dg-1:#0176cb;
++  --dg-2:#049ce3;
++  --dg-3:#0ac4fe;
++  --dg-4:#96dcf5;
++}
++body{ background: radial-gradient(1200px 700px at 18% -10%, rgba(10,196,254,.14), transparent 56%),
++               radial-gradient(1000px 680px at 82% -20%, rgba(4,156,227,.12), transparent 55%),
++               linear-gradient(180deg, #f6fbff, #fff 42%) !important; }
++.swagger-ui .topbar{ background: linear-gradient(105deg, var(--dg-1), var(--dg-2) 52%, var(--dg-3)) !important; }
++.swagger-ui .topbar .link{ color:#fff !important; font-weight: 800 !important; }
++.swagger-ui .topbar .download-url-wrapper{ display:none !important; }
++.swagger-ui .info .title{ color: var(--dg-ink) !important; font-weight: 900 !important; }
++.swagger-ui .opblock.opblock-get{ border-color: rgba(4,156,227,.22) !important; }
++.swagger-ui .opblock.opblock-post{ border-color: rgba(10,196,254,.24) !important; }
++.swagger-ui .btn.authorize{ border-color: rgba(4,156,227,.30) !important; }
++.swagger-ui .btn.authorize svg{ fill: var(--dg-2) !important; }
++.swagger-ui .btn.execute{ background: linear-gradient(105deg, var(--dg-1), var(--dg-2)) !important; border-color: rgba(255,255,255,.22) !important; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Varianta B: FastAPI (nebo jiný ASGI) – vlastní Swagger UI HTML
+# ─────────────────────────────────────────────────────────────────────────────
+# - Vygeneruj si vlastní swagger HTML (get_swagger_ui_html) a přidej customCssUrl nebo vlož <style>.
+# - Přesná implementace závisí na tom, jak DAGMAR backend swagger publikuje.
+#
+# Příklad (NE patch, jen návod):
+#   from fastapi.openapi.docs import get_swagger_ui_html
+#   @app.get("/docs", include_in_schema=False)
+#   def custom_swagger_ui_html():
+#       return get_swagger_ui_html(
+#           openapi_url=app.openapi_url,
+#           title="DAGMAR API",
+#           swagger_favicon_url="/static/dagmar-favicon.png",
+#           swagger_ui_parameters={"docExpansion":"none"},
+#           custom_css_url="/static/dagmar-swagger.css",
+#       )

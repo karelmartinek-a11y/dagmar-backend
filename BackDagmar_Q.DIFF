@@ -1,0 +1,16 @@
+diff --git a/app/db/models.py b/app/db/models.py
+--- a/app/db/models.py
++++ b/app/db/models.py
+@@ -10,12 +10,12 @@ from sqlalchemy import (
+     Date,
+     DateTime,
+     Enum,
+-    ForeignKey, UniqueConstraint,
++    ForeignKey,
+     Index,
+     Integer,
+     String,
+     Text,
+     UniqueConstraint,
+     func,
+ )
