@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, inspect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_instance
-from app.db.models import Attendance, AttendanceLock, Instance, ShiftPlan
+from app.db.models import Attendance, AttendanceLock, Base, Instance, ShiftPlan
 from app.db.session import get_db
 from app.utils.timeparse import parse_hhmm_or_none
 
@@ -67,6 +69,7 @@ def get_month_attendance(
     db: Session = Depends(get_db),
     inst: Instance = Depends(require_instance),
 ) -> AttendanceMonthOut:
+    _ensure_shift_plan_tables(db)
     start, end = _month_range(year, month)
 
     if _is_locked(db, inst.id, year, month):
@@ -85,13 +88,17 @@ def get_month_attendance(
 
     by_date: dict[dt.date, Attendance] = {r.date: r for r in rows}
 
-    plan_rows = db.execute(
-        select(ShiftPlan)
-        .where(ShiftPlan.instance_id == inst.id)
-        .where(ShiftPlan.date >= start)
-        .where(ShiftPlan.date < end)
-    ).scalars().all()
-    plan_by_date: dict[dt.date, ShiftPlan] = {r.date: r for r in plan_rows}
+    plan_by_date: dict[dt.date, ShiftPlan] = {}
+    try:
+        plan_rows = db.execute(
+            select(ShiftPlan)
+            .where(ShiftPlan.instance_id == inst.id)
+            .where(ShiftPlan.date >= start)
+            .where(ShiftPlan.date < end)
+        ).scalars().all()
+        plan_by_date = {r.date: r for r in plan_rows}
+    except SQLAlchemyError as e:
+        logging.getLogger(__name__).warning("ShiftPlan unavailable for attendance: %s", e)
 
     days: list[AttendanceDayOut] = []
     cur = start
@@ -110,6 +117,21 @@ def get_month_attendance(
         cur = cur + dt.timedelta(days=1)
 
     return AttendanceMonthOut(days=days)
+
+
+def _ensure_shift_plan_tables(db: Session) -> None:
+    try:
+        bind = db.get_bind()
+        insp = inspect(bind)
+        missing = []
+        if not insp.has_table("shift_plan"):
+            missing.append(ShiftPlan.__table__)
+        if not insp.has_table("shift_plan_month_instances"):
+            missing.append(Base.metadata.tables.get("shift_plan_month_instances"))
+        if missing:
+            Base.metadata.create_all(bind=bind, tables=[t for t in missing if t is not None])
+    except Exception as e:
+        logging.getLogger(__name__).warning("Unable to ensure shift plan tables (attendance): %s", e)
 
 
 @router.put("/api/v1/attendance", response_model=OkOut)
