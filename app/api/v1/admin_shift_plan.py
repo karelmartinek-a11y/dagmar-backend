@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
@@ -79,6 +81,14 @@ def admin_get_shift_plan_month(
     _admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> ShiftPlanMonthOut:
+    try:
+        return _admin_get_shift_plan_month_impl(db=db, year=year, month=month)
+    except SQLAlchemyError as e:
+        logging.getLogger(__name__).warning("Shift plan tables unavailable: %s", e)
+        return ShiftPlanMonthOut(year=year, month=month, selected_instance_ids=[], active_instances=[], rows=[])
+
+
+def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int) -> ShiftPlanMonthOut:
     start, end = _month_range(year, month)
 
     active_instances = db.execute(
@@ -150,6 +160,14 @@ def admin_upsert_shift_plan(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> OkOut:
+    try:
+        return _admin_upsert_shift_plan_impl(db=db, body=body)
+    except SQLAlchemyError as e:
+        logging.getLogger(__name__).warning("Shift plan write failed: %s", e)
+        raise HTTPException(status_code=500, detail="Shift plan storage is not available") from e
+
+
+def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut:
     inst = db.get(Instance, body.instance_id)
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
@@ -197,6 +215,14 @@ def admin_set_shift_plan_selection(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> OkOut:
+    try:
+        return _admin_set_shift_plan_selection_impl(db=db, body=body)
+    except SQLAlchemyError as e:
+        logging.getLogger(__name__).warning("Shift plan selection write failed: %s", e)
+        raise HTTPException(status_code=500, detail="Shift plan storage is not available") from e
+
+
+def _admin_set_shift_plan_selection_impl(db: Session, body: ShiftPlanSelectionIn) -> OkOut:
     # Keep order, remove duplicates & empties.
     uniq: list[str] = []
     seen: set[str] = set()
