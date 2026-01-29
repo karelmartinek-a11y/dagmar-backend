@@ -32,7 +32,7 @@ def strip_diacritics(value: str) -> str:
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
-def slugify_filename(value: str, *, max_len: int = 80) -> str:
+def slugify_filename(value: str | None, *, max_len: int = 80) -> str:
     """Create a deterministic safe filename stem.
 
     Rules:
@@ -77,6 +77,6 @@ def slugify_filename(value: str, *, max_len: int = 80) -> str:
     return value
 
 
-def filename_safe(value: str, *, max_len: int = 80) -> str:
+def filename_safe(value: str | None, *, max_len: int = 80) -> str:
     """Backward-compatible alias used by export endpoints."""
     return slugify_filename(value, max_len=max_len)

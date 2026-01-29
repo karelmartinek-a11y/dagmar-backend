@@ -15,8 +15,6 @@ def is_valid_hhmm(value: str | None) -> bool:
     """Return True if value is None or a valid HH:MM time in 00:00-23:59."""
     if value is None:
         return True
-    if not isinstance(value, str):
-        return False
     return _TIME_RE.match(value) is not None
 
 

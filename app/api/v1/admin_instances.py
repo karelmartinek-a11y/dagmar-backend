@@ -42,6 +42,15 @@ class SetTemplateIn(BaseModel):
     employment_template: Literal["DPP_DPC", "HPP"]
 
 
+EmploymentTemplateLiteral = Literal["DPP_DPC", "HPP"]
+
+
+def _normalize_employment_template(value: str | None) -> EmploymentTemplateLiteral:
+    if value == EmploymentTemplate.HPP.value:
+        return "HPP"
+    return "DPP_DPC"
+
+
 @router.get("/instances", response_model=list[InstanceOut])
 def list_instances(
     _admin: Annotated[dict, Depends(require_admin)],
@@ -61,7 +70,7 @@ def list_instances(
             activated_at=i.activated_at,
             revoked_at=i.revoked_at,
             deactivated_at=i.deactivated_at,
-            employment_template=i.employment_template or EmploymentTemplate.DPP_DPC.value,
+            employment_template=_normalize_employment_template(i.employment_template),
         )
         for i in items
     ]
@@ -191,8 +200,8 @@ def delete_instance(
     if instance_id == "pending":
         pending = db.scalars(select(Instance).where(Instance.status == InstanceStatus.PENDING)).all()
         deleted = 0
-        for inst in pending:
-            db.delete(inst)
+        for pending_inst in pending:
+            db.delete(pending_inst)
             deleted += 1
         db.commit()
         return {"ok": True, "deleted": deleted}

@@ -6,7 +6,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.config import Settings
+from app.config import get_settings
 from app.db.models import Base
 
 # Alembic Config object
@@ -32,7 +32,7 @@ def _get_db_url() -> str:
     url = os.getenv("DATABASE_URL")
     if url:
         return url
-    return Settings().database_url
+    return get_settings().database_url
 
 
 def run_migrations_offline() -> None:

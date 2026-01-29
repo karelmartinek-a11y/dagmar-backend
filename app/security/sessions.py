@@ -7,7 +7,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -54,7 +54,7 @@ class SessionCookieConfig:
     # Secure cookie is required in production. For local dev you can disable via env.
     secure: bool = True
     httponly: bool = True
-    samesite: str = "lax"  # "lax" is safe for typical admin UX; POSTs are CSRF-protected.
+    samesite: Literal["lax", "strict"] = "lax"  # "lax" is safe for typical admin UX; POSTs are CSRF-protected.
     max_age_seconds: int = 60 * 60 * 12  # 12 hours
 
 

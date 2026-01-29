@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import secrets
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -51,7 +52,19 @@ def _constant_time_eq(a: str, b: str) -> bool:
         return False
 
 
-def issue_csrf_token(session: dict, cfg: CsrfConfig | None = None) -> str:
+def _get_request_session(request: Request) -> MutableMapping[str, object] | None:
+    session_obj = getattr(request, "session", None)
+    if isinstance(session_obj, MutableMapping):
+        return session_obj
+    state = getattr(request, "state", None)
+    if state is not None:
+        state_session = getattr(state, "session", None)
+        if isinstance(state_session, MutableMapping):
+            return state_session
+    return None
+
+
+def issue_csrf_token(session: MutableMapping[str, object], cfg: CsrfConfig | None = None) -> str:
     """Issue a CSRF token and store it in the session.
 
     Session is a mutable dict maintained by the admin session middleware.
@@ -79,24 +92,17 @@ def csrf_issue_token(
     settings = settings or get_settings()
     cfg = cfg or CsrfConfig()
 
-    session: dict | None = None
+    session_store: MutableMapping[str, object] | None = None
     if request is not None:
-        try:
-            session = request.session  # type: ignore[attr-defined]
-        except Exception:
-            session = getattr(request.state, "session", None)
+        session_store = _get_request_session(request)
 
-    if session is None:
-        session = {}
+    session: MutableMapping[str, object] = session_store if session_store is not None else {}
 
     token = get_or_rotate_csrf_token(session, cfg)
 
     # Persist into session for middleware-managed storage.
-    try:
-        if request is not None:
-            request.session.update(session)  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    if session_store is not None:
+        session_store.update(session)
 
     if response is not None:
         response.headers[cfg.header_name] = token
@@ -114,12 +120,12 @@ def csrf_issue_token(
     return token
 
 
-def get_or_rotate_csrf_token(session: dict, cfg: CsrfConfig | None = None) -> str:
+def get_or_rotate_csrf_token(session: MutableMapping[str, object], cfg: CsrfConfig | None = None) -> str:
     cfg = cfg or CsrfConfig()
     token = session.get("csrf_token")
     issued_at_raw = session.get("csrf_issued_at")
 
-    if not token or not issued_at_raw:
+    if not isinstance(token, str) or not isinstance(issued_at_raw, str):
         return issue_csrf_token(session, cfg)
 
     try:
@@ -177,17 +183,12 @@ async def require_csrf(
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
 
-    session: dict | None = None
-    try:
-        session = request.session  # type: ignore[attr-defined]
-    except Exception:
-        session = getattr(request.state, "session", None)
-
+    session = _get_request_session(request)
     if not session:
         raise CsrfError("Missing session")
 
     expected = session.get("csrf_token")
-    if not expected:
+    if not isinstance(expected, str) or not expected:
         raise CsrfError("Missing CSRF token in session")
 
     provided = extract_csrf_token(request, csrf_header)
@@ -196,7 +197,11 @@ async def require_csrf(
         # Try form field.
         try:
             form = await request.form()
-            provided = (form.get("csrf_token") or "").strip() or None
+            raw_token = form.get("csrf_token")
+            if isinstance(raw_token, str):
+                provided = raw_token.strip() or None
+            else:
+                provided = None
         except Exception:
             provided = None
 

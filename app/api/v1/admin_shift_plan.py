@@ -6,7 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, inspect, select
+from sqlalchemy import Table, delete, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -106,7 +106,7 @@ def _ensure_shift_plan_tables(db: Session) -> None:
     try:
         bind = db.get_bind()
         insp = inspect(bind)
-        missing = []
+        missing: list[Table] = []
         if not insp.has_table("shift_plan"):
             missing.append(ShiftPlan.__table__)
         if not insp.has_table("shift_plan_month_instances"):

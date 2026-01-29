@@ -74,9 +74,11 @@ async def admin_login(
     if payload is None:
         try:
             form = await request.form()
+            raw_username = form.get("username")
+            raw_password = form.get("password")
             payload = AdminLoginBody(
-                username=(form.get("username") or "").strip() or None,
-                password=form.get("password") or "",
+                username=(raw_username.strip() if isinstance(raw_username, str) else "") or None,
+                password=raw_password if isinstance(raw_password, str) else "",
             )
         except ValidationError:
             raise HTTPException(status_code=400, detail="Vyplňte uživatelské jméno a heslo.") from None

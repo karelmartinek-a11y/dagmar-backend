@@ -3,13 +3,31 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 
 
 def _format_deploy_tag(dt: datetime) -> str:
     return f"{dt.year % 100:02d}{dt.month:02d}{dt.day:02d}{dt.hour:02d}{dt.minute:02d}"
+
+
+_ENV_VALUES = ("production", "staging", "development")
+_SAMESITE_VALUES = ("lax", "strict")
+
+
+def _coerce_environment(value: str) -> Literal["production", "staging", "development"]:
+    normalized = value.lower()
+    if normalized in _ENV_VALUES:
+        return cast(Literal["production", "staging", "development"], normalized)
+    return "production"
+
+
+def _coerce_cookie_samesite(value: str) -> Literal["lax", "strict"]:
+    normalized = value.lower()
+    if normalized in _SAMESITE_VALUES:
+        return cast(Literal["lax", "strict"], normalized)
+    return "lax"
 
 
 class Settings(BaseModel):
@@ -156,7 +174,7 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
 
     settings = Settings(
         app_name=os.getenv("DAGMAR_APP_NAME", "DAGMAR"),
-        environment=os.getenv("DAGMAR_ENV", "production"),
+        environment=_coerce_environment(os.getenv("DAGMAR_ENV", "production")),
         public_base_url=os.getenv("DAGMAR_PUBLIC_BASE_URL", "https://dagmar.hcasc.cz"),
         bind_host=os.getenv("DAGMAR_BIND_HOST", "127.0.0.1"),
         bind_port=int(os.getenv("DAGMAR_BIND_PORT", "8101")),
@@ -174,7 +192,7 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
         ),
         session_max_age_seconds=int(os.getenv("DAGMAR_SESSION_MAX_AGE_SECONDS", str(60 * 60 * 12))),
         cookie_secure=os.getenv("DAGMAR_COOKIE_SECURE", "true").lower() == "true",
-        cookie_samesite=(os.getenv("DAGMAR_COOKIE_SAMESITE", "lax").lower()),
+        cookie_samesite=_coerce_cookie_samesite(os.getenv("DAGMAR_COOKIE_SAMESITE", "lax")),
         cors_enabled=os.getenv("DAGMAR_CORS_ENABLED", "false").lower() == "true",
         cors_allow_origins=(
             [o.strip() for o in os.getenv("DAGMAR_CORS_ALLOW_ORIGINS", "https://dagmar.hcasc.cz").split(",") if o.strip()]

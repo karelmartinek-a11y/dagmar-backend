@@ -22,6 +22,7 @@ import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 
 from passlib.context import CryptContext
 
@@ -69,14 +70,14 @@ def hash_token(token: str) -> str:
     """Hash plaintext token for storage."""
 
     # passlib will generate salt internally
-    return _pwd_context.hash(token)
+    return cast(str, _pwd_context.hash(token))
 
 
 def verify_token(token: str, stored_hash: str) -> bool:
     """Verify token against stored hash."""
 
     try:
-        return _pwd_context.verify(token, stored_hash)
+        return bool(_pwd_context.verify(token, stored_hash))
     except Exception:
         return False
 
@@ -93,8 +94,6 @@ def validate_token_format(token: str) -> bool:
     We keep this intentionally permissive: just required prefix and sane length.
     """
 
-    if not isinstance(token, str):
-        return False
     if not token.startswith(TOKEN_HUMAN_PREFIX):
         return False
     # Minimum length: prefix + some payload
@@ -127,11 +126,12 @@ def verify_instance_token(db, raw_token: str) -> models.Instance | None:
     if not validate_token_format(raw_token):
         return None
 
-    instances = (
+    instances = cast(
+        list[models.Instance],
         db.query(models.Instance)
         .filter(models.Instance.token_hash.isnot(None))
         .filter(models.Instance.token_hash != "")
-        .all()
+        .all(),
     )
 
     for inst in instances:

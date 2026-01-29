@@ -6,7 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import inspect, select
+from sqlalchemy import Table, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -126,13 +126,15 @@ def _ensure_shift_plan_tables(db: Session) -> None:
     try:
         bind = db.get_bind()
         insp = inspect(bind)
-        missing = []
+        missing: list[Table] = []
         if not insp.has_table("shift_plan"):
             missing.append(ShiftPlan.__table__)
         if not insp.has_table("shift_plan_month_instances"):
-            missing.append(Base.metadata.tables.get("shift_plan_month_instances"))
+            month_table = Base.metadata.tables.get("shift_plan_month_instances")
+            if month_table is not None:
+                missing.append(month_table)
         if missing:
-            Base.metadata.create_all(bind=bind, tables=[t for t in missing if t is not None])
+            Base.metadata.create_all(bind=bind, tables=missing)
     except Exception as e:
         logging.getLogger(__name__).warning("Unable to ensure shift plan tables (attendance): %s", e)
 

@@ -39,7 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- Middleware order matters: rate-limit early, sessions before endpoints.
     if settings.rate_limit_enabled:
         if settings.rate_limit_default_per_minute:
-            limiter.default_limits = [f"{settings.rate_limit_default_per_minute}/minute"]
+            setattr(limiter, "default_limits", [f"{settings.rate_limit_default_per_minute}/minute"])
         init_rate_limiting(app)
 
     # Admin session cookie.

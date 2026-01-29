@@ -42,7 +42,10 @@ async def _call_openai(prompt: str) -> str:
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
+        try:
+            return str(data["choices"][0]["message"]["content"]).strip()
+        except Exception:
+            return ""
 
 
 async def _send_whatsapp(text: str, to: str) -> None:

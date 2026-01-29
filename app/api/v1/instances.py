@@ -60,6 +60,15 @@ class ClaimTokenOut(BaseModel):
     display_name: str
 
 
+EmploymentTemplateLiteral = Literal["DPP_DPC", "HPP"]
+
+
+def _normalize_employment_template(value: str | None) -> EmploymentTemplateLiteral:
+    if value == EmploymentTemplate.HPP.value:
+        return "HPP"
+    return "DPP_DPC"
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -174,7 +183,7 @@ def get_status(instance_id: str, request: Request, response: Response, db: Sessi
     return InstanceStatusOutActive(
         status="ACTIVE",
         display_name=inst.display_name,
-        employment_template=inst.employment_template or EmploymentTemplate.DPP_DPC.value,
+        employment_template=_normalize_employment_template(inst.employment_template),
         afternoon_cutoff=_minutes_to_hhmm(settings.afternoon_cutoff_minutes),
     )
 
