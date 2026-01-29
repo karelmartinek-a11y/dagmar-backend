@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Protocol, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,6 +19,10 @@ from app.api.v1.attendance import router as attendance_router
 from app.api.v1.instances import router as instances_router
 from app.config import Settings, get_settings
 from app.security.rate_limit import init_rate_limiting, limiter
+
+
+class _LimiterWithDefaults(Protocol):
+    default_limits: list[str]
 
 
 def _now_ms() -> int:
@@ -39,7 +43,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- Middleware order matters: rate-limit early, sessions before endpoints.
     if settings.rate_limit_enabled:
         if settings.rate_limit_default_per_minute:
-            setattr(limiter, "default_limits", [f"{settings.rate_limit_default_per_minute}/minute"])
+            limiter_with_defaults = cast(_LimiterWithDefaults, limiter)
+            limiter_with_defaults.default_limits = [f"{settings.rate_limit_default_per_minute}/minute"]
         init_rate_limiting(app)
 
     # Admin session cookie.
