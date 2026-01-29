@@ -8,6 +8,7 @@ from typing import cast
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import Table, delete, inspect, select
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -105,7 +106,7 @@ def admin_get_shift_plan_month(
 
 def _ensure_shift_plan_tables(db: Session) -> None:
     try:
-        bind = db.get_bind()
+        bind = cast(Connection, db.get_bind())
         insp = inspect(bind)
         bind.exec_driver_sql(
             "DO $$ BEGIN "

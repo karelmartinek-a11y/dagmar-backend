@@ -8,6 +8,7 @@ from typing import cast
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import Table, inspect, select
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -125,7 +126,7 @@ def get_month_attendance(
 
 def _ensure_shift_plan_tables(db: Session) -> None:
     try:
-        bind = db.get_bind()
+        bind = cast(Connection, db.get_bind())
         insp = inspect(bind)
         # Zajisti, že enum typy už existují (bez duplicit) – IF NOT EXISTS zabrání kolizi.
         bind.exec_driver_sql(
