@@ -1,9 +1,10 @@
+# ruff: noqa: B008
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -21,8 +22,8 @@ router = APIRouter(prefix="/api/v1/instances", tags=["instances"])
 class InstanceRegisterIn(BaseModel):
     client_type: Literal["ANDROID", "WEB"]
     device_fingerprint: str = Field(min_length=1, max_length=200)
-    device_info: Optional[dict[str, Any]] = None
-    display_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    device_info: dict[str, Any] | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class InstanceRegisterOut(BaseModel):
@@ -60,7 +61,7 @@ class ClaimTokenOut(BaseModel):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _minutes_to_hhmm(minutes: int) -> str:

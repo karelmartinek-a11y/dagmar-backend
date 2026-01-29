@@ -1,22 +1,21 @@
+# ruff: noqa: B008
 from __future__ import annotations
 
 import csv
 import io
-import csv
-import io
 import zipfile
+from collections.abc import Iterable
 from datetime import date
-from typing import Iterable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..deps import require_admin
 from ...db.models import Attendance, Instance
 from ...db.session import get_db
 from ...utils.slugify import filename_safe
+from ..deps import require_admin
 
 router = APIRouter(tags=["admin"])
 
@@ -87,8 +86,8 @@ def _iter_bytes(data: bytes, chunk_size: int = 64 * 1024) -> Iterable[bytes]:
 @router.get("/api/v1/admin/export")
 def export_csv_or_zip(
     month: str = Query(..., description="YYYY-MM"),
-    instance_id: Optional[str] = Query(None),
-    bulk: Optional[bool] = Query(False),
+    instance_id: str | None = Query(None),
+    bulk: bool | None = Query(False),
     _admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ):

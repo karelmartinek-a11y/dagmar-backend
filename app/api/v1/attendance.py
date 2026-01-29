@@ -1,12 +1,12 @@
+# ruff: noqa: B008
 from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, inspect
+from sqlalchemy import inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -20,10 +20,10 @@ router = APIRouter(tags=["attendance"])
 
 class AttendanceDayOut(BaseModel):
     date: str
-    arrival_time: Optional[str] = None
-    departure_time: Optional[str] = None
-    planned_arrival_time: Optional[str] = None
-    planned_departure_time: Optional[str] = None
+    arrival_time: str | None = None
+    departure_time: str | None = None
+    planned_arrival_time: str | None = None
+    planned_departure_time: str | None = None
 
 
 class AttendanceMonthOut(BaseModel):
@@ -33,8 +33,8 @@ class AttendanceMonthOut(BaseModel):
 
 class AttendanceUpsertIn(BaseModel):
     date: str = Field(..., description="YYYY-MM-DD")
-    arrival_time: Optional[str] = Field(None, description='HH:MM or null')
-    departure_time: Optional[str] = Field(None, description='HH:MM or null')
+    arrival_time: str | None = Field(None, description='HH:MM or null')
+    departure_time: str | None = Field(None, description='HH:MM or null')
 
 
 class OkOut(BaseModel):

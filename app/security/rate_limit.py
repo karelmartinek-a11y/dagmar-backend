@@ -24,8 +24,6 @@ We key by client IP (from Nginx via X-Forwarded-For). Nginx config MUST set:
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import Request
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -93,29 +91,29 @@ class DagmarRateLimits:
     ATTENDANCE_PUT = "120/minute"
 
 
-def limit_admin_login(route_limit: Optional[str] = None):
+def limit_admin_login(route_limit: str | None = None):
     """Decorator for admin login endpoint."""
 
     return limiter.limit(route_limit or DagmarRateLimits.ADMIN_LOGIN)
 
 
-def limit_instance_status(route_limit: Optional[str] = None):
+def limit_instance_status(route_limit: str | None = None):
     """Decorator for instance status polling endpoint."""
 
     return limiter.limit(route_limit or DagmarRateLimits.INSTANCE_STATUS)
 
 
-def limit_instance_claim_token(route_limit: Optional[str] = None):
+def limit_instance_claim_token(route_limit: str | None = None):
     """Decorator for instance claim-token polling endpoint."""
 
     return limiter.limit(route_limit or DagmarRateLimits.INSTANCE_CLAIM_TOKEN)
 
 
-def limit_attendance_get(route_limit: Optional[str] = None):
+def limit_attendance_get(route_limit: str | None = None):
     return limiter.limit(route_limit or DagmarRateLimits.ATTENDANCE_GET)
 
 
-def limit_attendance_put(route_limit: Optional[str] = None):
+def limit_attendance_put(route_limit: str | None = None):
     return limiter.limit(route_limit or DagmarRateLimits.ATTENDANCE_PUT)
 
 

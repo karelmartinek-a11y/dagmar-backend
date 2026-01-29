@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional
 
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
@@ -12,7 +11,7 @@ class TimeParseError(ValueError):
     pass
 
 
-def is_valid_hhmm(value: Optional[str]) -> bool:
+def is_valid_hhmm(value: str | None) -> bool:
     """Return True if value is None or a valid HH:MM time in 00:00-23:59."""
     if value is None:
         return True
@@ -21,7 +20,7 @@ def is_valid_hhmm(value: Optional[str]) -> bool:
     return _TIME_RE.match(value) is not None
 
 
-def normalize_hhmm_or_none(value: Optional[str]) -> Optional[str]:
+def normalize_hhmm_or_none(value: str | None) -> str | None:
     """Normalize empty strings to None; validate HH:MM.
 
     Rules (DAGMAR):
@@ -38,7 +37,7 @@ def normalize_hhmm_or_none(value: Optional[str]) -> Optional[str]:
     return value
 
 
-def parse_hhmm_or_none(value: Optional[str]) -> Optional[str]:
+def parse_hhmm_or_none(value: str | None) -> str | None:
     """Alias used by API layer; keeps return type Optional[str] with validation."""
     return normalize_hhmm_or_none(value)
 
@@ -61,7 +60,7 @@ class YearMonth:
     month: int
 
     @staticmethod
-    def parse(year: str | int, month: str | int) -> "YearMonth":
+    def parse(year: str | int, month: str | int) -> YearMonth:
         try:
             y = int(year)
             m = int(month)

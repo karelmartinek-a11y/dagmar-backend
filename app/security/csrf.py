@@ -3,10 +3,9 @@ from __future__ import annotations
 import hmac
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from fastapi import Depends, Header, HTTPException, Request, Response
+from fastapi import Header, HTTPException, Request, Response
 
 from app.config import Settings, get_settings
 
@@ -41,7 +40,7 @@ class CsrfError(HTTPException):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _constant_time_eq(a: str, b: str) -> bool:
@@ -52,12 +51,13 @@ def _constant_time_eq(a: str, b: str) -> bool:
         return False
 
 
-def issue_csrf_token(session: dict, cfg: CsrfConfig = CsrfConfig()) -> str:
+def issue_csrf_token(session: dict, cfg: CsrfConfig | None = None) -> str:
     """Issue a CSRF token and store it in the session.
 
     Session is a mutable dict maintained by the admin session middleware.
     """
 
+    cfg = cfg or CsrfConfig()
     token = secrets.token_urlsafe(32)
     session["csrf_token"] = token
     session["csrf_issued_at"] = _utcnow().isoformat()
@@ -68,7 +68,7 @@ def csrf_issue_token(
     request: Request | None = None,
     response: Response | None = None,
     settings: Settings | None = None,
-    cfg: CsrfConfig = CsrfConfig(),
+    cfg: CsrfConfig | None = None,
 ) -> str:
     """Compatibility helper used by admin login endpoint.
 
@@ -77,8 +77,9 @@ def csrf_issue_token(
     """
 
     settings = settings or get_settings()
+    cfg = cfg or CsrfConfig()
 
-    session: Optional[dict] = None
+    session: dict | None = None
     if request is not None:
         try:
             session = request.session  # type: ignore[attr-defined]
@@ -113,7 +114,8 @@ def csrf_issue_token(
     return token
 
 
-def get_or_rotate_csrf_token(session: dict, cfg: CsrfConfig = CsrfConfig()) -> str:
+def get_or_rotate_csrf_token(session: dict, cfg: CsrfConfig | None = None) -> str:
+    cfg = cfg or CsrfConfig()
     token = session.get("csrf_token")
     issued_at_raw = session.get("csrf_issued_at")
 
@@ -123,7 +125,7 @@ def get_or_rotate_csrf_token(session: dict, cfg: CsrfConfig = CsrfConfig()) -> s
     try:
         issued_at = datetime.fromisoformat(issued_at_raw)
         if issued_at.tzinfo is None:
-            issued_at = issued_at.replace(tzinfo=timezone.utc)
+            issued_at = issued_at.replace(tzinfo=UTC)
     except Exception:
         return issue_csrf_token(session, cfg)
 
@@ -135,9 +137,10 @@ def get_or_rotate_csrf_token(session: dict, cfg: CsrfConfig = CsrfConfig()) -> s
 
 def extract_csrf_token(
     request: Request,
-    csrf_header: Optional[str],
-    cfg: CsrfConfig = CsrfConfig(),
-) -> Optional[str]:
+    csrf_header: str | None,
+    cfg: CsrfConfig | None = None,
+) -> str | None:
+    cfg = cfg or CsrfConfig()
     if csrf_header:
         return csrf_header.strip()
 
@@ -153,7 +156,7 @@ def extract_csrf_token(
 
 async def require_csrf(
     request: Request,
-    csrf_header: Optional[str] = Header(default=None, alias="X-CSRF-Token"),
+    csrf_header: str | None = Header(default=None, alias="X-CSRF-Token"),
 ) -> None:
     """Dependency to protect state-changing admin endpoints.
 
@@ -174,7 +177,7 @@ async def require_csrf(
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
 
-    session: Optional[dict] = None
+    session: dict | None = None
     try:
         session = request.session  # type: ignore[attr-defined]
     except Exception:

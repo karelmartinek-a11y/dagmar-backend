@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from passlib.context import CryptContext
 
-
 # Prefer Argon2 (modern, memory-hard). Fallback to bcrypt if needed.
 _pwd_context = CryptContext(
     schemes=["argon2", "bcrypt"],

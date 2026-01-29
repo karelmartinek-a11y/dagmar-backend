@@ -7,12 +7,12 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.config import get_settings, Settings
+from app.config import Settings, get_settings
 
 """Admin session implementation for DAGMAR.
 
@@ -39,7 +39,7 @@ ADMIN_SESSION_COOKIE = SESSION_COOKIE_NAME
 
 @dataclass(frozen=True)
 class AdminSession:
-    username: Optional[str]
+    username: str | None
     issued_at: int
 
     @property
@@ -93,7 +93,7 @@ def _encode_cookie_value(session_id: str, secret: str) -> str:
     return f"{payload}.{sig}"
 
 
-def _decode_cookie_value(cookie_value: str, secret: str) -> Optional[str]:
+def _decode_cookie_value(cookie_value: str, secret: str) -> str | None:
     """Return session_id if signature matches, otherwise None."""
 
     try:
@@ -141,12 +141,12 @@ class AdminSessionData:
         return json.dumps({"admin_username": self.admin_username, "issued_at": self.issued_at}, separators=(",", ":"))
 
     @staticmethod
-    def from_json(s: str) -> "AdminSessionData":
+    def from_json(s: str) -> AdminSessionData:
         obj = json.loads(s)
         return AdminSessionData(admin_username=str(obj["admin_username"]), issued_at=int(obj["issued_at"]))
 
 
-def get_session_id_from_request(req: Request, *, cookie_cfg: SessionCookieConfig, secret: str) -> Optional[str]:
+def get_session_id_from_request(req: Request, *, cookie_cfg: SessionCookieConfig, secret: str) -> str | None:
     raw = req.cookies.get(cookie_cfg.name)
     if not raw:
         return None
@@ -197,7 +197,7 @@ def delete_admin_session_row(db: Any, *, session_id: str, AdminSessionModel: Any
     db.commit()
 
 
-def load_admin_session_data(db: Any, *, session_id: str, AdminSessionModel: Any) -> Optional[AdminSessionData]:
+def load_admin_session_data(db: Any, *, session_id: str, AdminSessionModel: Any) -> AdminSessionData | None:
     """Load and validate server-side session.
 
     Returns None if not found or expired.

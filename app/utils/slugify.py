@@ -14,7 +14,6 @@ from __future__ import annotations
 import re
 import unicodedata
 
-
 _WHITESPACE_RE = re.compile(r"\s+")
 _ALLOWED_RE = re.compile(r"[^a-z0-9_-]+")
 _UNDERSCORE_RUN_RE = re.compile(r"_+")

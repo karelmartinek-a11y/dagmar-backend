@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated, List, Optional, Literal
+from datetime import UTC, datetime
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..deps import get_db, require_admin
 from ...db.models import EmploymentTemplate, Instance, InstanceStatus
 from ...security.csrf import require_csrf
+from ..deps import get_db, require_admin
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-instances"])
 
@@ -20,12 +20,12 @@ class InstanceOut(BaseModel):
     client_type: str
     device_fingerprint: str
     status: Literal["PENDING", "ACTIVE", "REVOKED", "DEACTIVATED"]
-    display_name: Optional[str] = None
+    display_name: str | None = None
     created_at: datetime
-    last_seen_at: Optional[datetime] = None
-    activated_at: Optional[datetime] = None
-    revoked_at: Optional[datetime] = None
-    deactivated_at: Optional[datetime] = None
+    last_seen_at: datetime | None = None
+    activated_at: datetime | None = None
+    revoked_at: datetime | None = None
+    deactivated_at: datetime | None = None
     employment_template: Literal["DPP_DPC", "HPP"] = "DPP_DPC"
 
 
@@ -42,7 +42,7 @@ class SetTemplateIn(BaseModel):
     employment_template: Literal["DPP_DPC", "HPP"]
 
 
-@router.get("/instances", response_model=List[InstanceOut])
+@router.get("/instances", response_model=list[InstanceOut])
 def list_instances(
     _admin: Annotated[dict, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
@@ -89,7 +89,7 @@ def activate_instance(
     inst.deactivated_at = None
 
     # Token issuance is handled by claim-token endpoint; activation only flips state + name.
-    inst.activated_at = datetime.now(timezone.utc)
+    inst.activated_at = datetime.now(UTC)
 
     db.add(inst)
     db.commit()
@@ -147,7 +147,7 @@ def revoke_instance(
         raise HTTPException(status_code=404, detail="Instance not found")
 
     inst.status = InstanceStatus.REVOKED
-    inst.revoked_at = datetime.now(timezone.utc)
+    inst.revoked_at = datetime.now(UTC)
 
     # Clearing token hash prevents further use even if client still has token.
     inst.token_hash = None
@@ -171,7 +171,7 @@ def deactivate_instance(
         raise HTTPException(status_code=404, detail="Instance not found")
 
     inst.status = InstanceStatus.DEACTIVATED
-    inst.deactivated_at = datetime.now(timezone.utc)
+    inst.deactivated_at = datetime.now(UTC)
     inst.token_hash = None
     inst.token_issued_at = None
 
@@ -204,7 +204,7 @@ def delete_instance(
     # If not revoked yet, revoke first to invalidate tokens before deletion.
     if inst.status != InstanceStatus.REVOKED:
         inst.status = InstanceStatus.REVOKED
-        inst.revoked_at = datetime.now(timezone.utc)
+        inst.revoked_at = datetime.now(UTC)
         inst.token_hash = None
         inst.token_issued_at = None
         db.add(inst)

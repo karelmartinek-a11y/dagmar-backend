@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -45,10 +45,10 @@ class Settings(BaseModel):
     # --- Admin auth (single admin account) ---
     admin_username: str = Field(default="admin")
     # Provide either admin_password (to be hashed on seed) OR admin_password_hash.
-    admin_password: Optional[str] = Field(
+    admin_password: str | None = Field(
         default=None, description="Plain password used only by seed_admin.sh"
     )
-    admin_password_hash: Optional[str] = Field(
+    admin_password_hash: str | None = Field(
         default=None,
         description="Password hash stored/used by backend. Preferred in production.",
     )
@@ -87,7 +87,7 @@ class Settings(BaseModel):
 
     # --- Deploy metadata ---
     deploy_tag: str = Field(
-        default_factory=lambda: _format_deploy_tag(datetime.now(timezone.utc)),
+        default_factory=lambda: _format_deploy_tag(datetime.now(UTC)),
         description="Kód nasazení backendu (YYMMDDHHMM).",
     )
 
@@ -134,7 +134,7 @@ def _load_env_file(path: str) -> None:
     if not os.path.exists(path):
         return
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for raw in f:
             line = raw.strip()
             if not line or line.startswith("#"):
@@ -195,7 +195,7 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
         disable_docs=os.getenv("DAGMAR_DISABLE_DOCS", "true").lower() == "true",
         deploy_tag=os.getenv(
             "DAGMAR_DEPLOY_TAG",
-            _format_deploy_tag(datetime.now(timezone.utc)),
+            _format_deploy_tag(datetime.now(UTC)),
         ),
     )
 

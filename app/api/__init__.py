@@ -1,10 +1,10 @@
 from fastapi import APIRouter
 
-from .v1.instances import router as instances_router
-from .v1.attendance import router as attendance_router
 from .v1.admin_auth import router as admin_auth_router
-from .v1.admin_instances import router as admin_instances_router
 from .v1.admin_export import router as admin_export_router
+from .v1.admin_instances import router as admin_instances_router
+from .v1.attendance import router as attendance_router
+from .v1.instances import router as instances_router
 
 
 def build_api_router() -> APIRouter:

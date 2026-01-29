@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime, date
+from datetime import date, datetime
 
 from sqlalchemy import (
     Date,
     DateTime,
     Enum,
-    ForeignKey, UniqueConstraint,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -75,7 +75,7 @@ class Instance(Base):
     attendances: Mapped[list[Attendance]] = relationship(
         back_populates="instance", cascade="all, delete-orphan", passive_deletes=True
     )
-    attendance_locks: Mapped[list["AttendanceLock"]] = relationship(
+    attendance_locks: Mapped[list[AttendanceLock]] = relationship(
         back_populates="instance", cascade="all, delete-orphan", passive_deletes=True
     )
 

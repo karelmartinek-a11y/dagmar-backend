@@ -1,22 +1,19 @@
+# ruff: noqa: B008
 from __future__ import annotations
-
-from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, ValidationError
 from starlette.responses import RedirectResponse
 
-from app.api.deps import get_db
 from app.config import Settings, get_settings
 from app.security.csrf import csrf_issue_token
 from app.security.passwords import verify_password
+from app.security.rate_limit import limiter
 from app.security.sessions import (
-    ADMIN_SESSION_COOKIE,
     clear_admin_session,
     get_admin_session,
     set_admin_session,
 )
-from app.security.rate_limit import limiter
 
 router = APIRouter(tags=["admin"])
 

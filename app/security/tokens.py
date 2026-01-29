@@ -21,8 +21,7 @@ import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from passlib.context import CryptContext
 
@@ -112,7 +111,7 @@ def make_token_record(token: str) -> TokenRecord:
     return TokenRecord(token_prefix=token_prefix(token), token_hash=hash_token(token))
 
 
-def maybe_redact(token: Optional[str]) -> str:
+def maybe_redact(token: str | None) -> str:
     """Redact token for logs."""
 
     if not token:
@@ -122,7 +121,7 @@ def maybe_redact(token: Optional[str]) -> str:
     return token[:6] + "…" + token[-4:]
 
 
-def verify_instance_token(db, raw_token: str) -> Optional[models.Instance]:
+def verify_instance_token(db, raw_token: str) -> models.Instance | None:
     """Find ACTIVE instance matching provided Bearer token."""
 
     if not validate_token_format(raw_token):
@@ -141,7 +140,7 @@ def verify_instance_token(db, raw_token: str) -> Optional[models.Instance]:
     return None
 
 
-def issue_instance_token_once(db, instance: models.Instance) -> Optional[str]:
+def issue_instance_token_once(db, instance: models.Instance) -> str | None:
     """Issue a new token if none exists. Returns plaintext token or None if already issued."""
 
     if instance.token_hash:
@@ -151,7 +150,7 @@ def issue_instance_token_once(db, instance: models.Instance) -> Optional[str]:
     rec = make_token_record(token)
 
     instance.token_hash = rec.token_hash
-    instance.token_issued_at = datetime.now(timezone.utc)
+    instance.token_issued_at = datetime.now(UTC)
     db.add(instance)
     return token
 
@@ -161,6 +160,6 @@ def rotate_instance_token(db, instance: models.Instance) -> str:
     token = generate_instance_token()
     rec = make_token_record(token)
     instance.token_hash = rec.token_hash
-    instance.token_issued_at = datetime.now(timezone.utc)
+    instance.token_issued_at = datetime.now(UTC)
     db.add(instance)
     return token

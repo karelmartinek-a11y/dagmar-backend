@@ -1,13 +1,13 @@
+# ruff: noqa: B008
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
 from app.db import models
+from app.db.session import get_db
 from app.security.sessions import get_admin_session
 from app.security.tokens import verify_instance_token
 
@@ -17,7 +17,7 @@ class InstanceAuth:
     instance: models.Instance
 
 
-def _bearer_from_auth_header(authorization: Optional[str]) -> Optional[str]:
+def _bearer_from_auth_header(authorization: str | None) -> str | None:
     if not authorization:
         return None
     parts = authorization.split(" ", 1)
@@ -43,7 +43,7 @@ def require_admin(request: Request):
 def require_instance_auth(
     request: Request,
     db: Session = Depends(get_db),
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> InstanceAuth:
     """Require instance Bearer token.
 
@@ -67,7 +67,7 @@ def require_instance_auth(
 def require_instance(
     request: Request,
     db: Session = Depends(get_db),
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> models.Instance:
     """Backward-compatible alias returning the Instance directly."""
     return require_instance_auth(request=request, db=db, authorization=authorization).instance

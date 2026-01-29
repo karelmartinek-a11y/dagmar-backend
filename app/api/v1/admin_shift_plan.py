@@ -1,12 +1,12 @@
+# ruff: noqa: B008
 from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select, inspect
+from sqlalchemy import delete, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -21,19 +21,19 @@ router = APIRouter(tags=["admin"])
 
 class ActiveInstanceOut(BaseModel):
     id: str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     employment_template: str
 
 
 class ShiftPlanDayOut(BaseModel):
     date: str
-    arrival_time: Optional[str] = None
-    departure_time: Optional[str] = None
+    arrival_time: str | None = None
+    departure_time: str | None = None
 
 
 class ShiftPlanRowOut(BaseModel):
     instance_id: str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     employment_template: str
     days: list[ShiftPlanDayOut]
 
@@ -55,8 +55,8 @@ class ShiftPlanSelectionIn(BaseModel):
 class ShiftPlanUpsertIn(BaseModel):
     instance_id: str = Field(..., min_length=1)
     date: str = Field(..., description="YYYY-MM-DD")
-    arrival_time: Optional[str] = Field(None, description="HH:MM or null")
-    departure_time: Optional[str] = Field(None, description="HH:MM or null")
+    arrival_time: str | None = Field(None, description="HH:MM or null")
+    departure_time: str | None = Field(None, description="HH:MM or null")
 
 
 class OkOut(BaseModel):

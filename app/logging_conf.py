@@ -2,7 +2,6 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 
-
 DEFAULT_LOG_FORMAT = (
     "%(asctime)s %(levelname)s %(name)s "
     "pid=%(process)d "
