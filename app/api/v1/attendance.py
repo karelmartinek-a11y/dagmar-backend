@@ -133,7 +133,7 @@ def _ensure_shift_plan_tables(db: Session) -> None:
         if not insp.has_table("shift_plan_month_instances"):
             month_table = Base.metadata.tables.get("shift_plan_month_instances")
             if month_table is not None:
-                missing.append(cast(Table, month_table))
+                missing.append(month_table)
         if missing:
             Base.metadata.create_all(bind=bind, tables=missing)
     except Exception as e:
