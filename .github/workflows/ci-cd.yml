@@ -44,14 +44,14 @@ jobs:
           password: ${{ secrets.DEPLOY_PASS }}
           script: |
             set -e
-            if [ ! -d /srv/hcas/_repos/dagmar-backend/.git ]; then
-              git clone https://github.com/karelmartinek-a11y/dagmar-backend.git /srv/hcas/_repos/dagmar-backend
+            if [ ! -d /srv/hcasc/_repos/dagmar-backend/.git ]; then
+              git clone https://github.com/karelmartinek-a11y/dagmar-backend.git /srv/hcasc/_repos/dagmar-backend
             fi
-            cd /srv/hcas/_repos/dagmar-backend
+            cd /srv/hcasc/_repos/dagmar-backend
             git fetch origin main
             git checkout main
             git reset --hard origin/main
-            rsync -a --delete --exclude='.git' /srv/hcas/_repos/dagmar-backend/ /opt/dagmar/backend/
+            rsync -a --delete --exclude='.git' /srv/hcasc/_repos/dagmar-backend/ /opt/dagmar/backend/
             if [ ! -d /opt/dagmar/backend/.venv ]; then
               python3 -m venv /opt/dagmar/backend/.venv
             fi
