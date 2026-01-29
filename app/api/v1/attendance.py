@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -128,11 +129,11 @@ def _ensure_shift_plan_tables(db: Session) -> None:
         insp = inspect(bind)
         missing: list[Table] = []
         if not insp.has_table("shift_plan"):
-            missing.append(ShiftPlan.__table__)
+            missing.append(cast(Table, ShiftPlan.__table__))
         if not insp.has_table("shift_plan_month_instances"):
             month_table = Base.metadata.tables.get("shift_plan_month_instances")
             if month_table is not None:
-                missing.append(month_table)
+                missing.append(cast(Table, month_table))
         if missing:
             Base.metadata.create_all(bind=bind, tables=missing)
     except Exception as e:
