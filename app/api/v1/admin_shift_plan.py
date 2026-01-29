@@ -107,6 +107,14 @@ def _ensure_shift_plan_tables(db: Session) -> None:
     try:
         bind = db.get_bind()
         insp = inspect(bind)
+        bind.exec_driver_sql(
+            "DO $$ BEGIN "
+            "IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'client_type') THEN "
+            "CREATE TYPE client_type AS ENUM ('ANDROID','WEB'); END IF; "
+            "IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'instance_status') THEN "
+            "CREATE TYPE instance_status AS ENUM ('PENDING','ACTIVE','REVOKED','DEACTIVATED'); END IF; "
+            "END $$;"
+        )
         missing: list[Table] = []
         if not insp.has_table("shift_plan"):
             missing.append(cast(Table, ShiftPlan.__table__))

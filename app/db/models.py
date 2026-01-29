@@ -44,12 +44,12 @@ class Instance(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)  # UUID string
 
-    client_type: Mapped[ClientType] = mapped_column(Enum(ClientType, name="client_type"), nullable=False)
+    client_type: Mapped[ClientType] = mapped_column(Enum(ClientType, name="client_type", create_type=False), nullable=False)
     device_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
     device_info_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[InstanceStatus] = mapped_column(
-        Enum(InstanceStatus, name="instance_status"), nullable=False, default=InstanceStatus.PENDING
+        Enum(InstanceStatus, name="instance_status", create_type=False), nullable=False, default=InstanceStatus.PENDING
     )
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     shift_plans = relationship("ShiftPlan", back_populates="instance", cascade="all, delete-orphan")
