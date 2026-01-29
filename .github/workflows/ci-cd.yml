@@ -18,6 +18,10 @@ jobs:
           pip install .[dev]
       - name: Syntax check
         run: python -m compileall app
+      - name: Ruff lint
+        run: ruff check app
+      - name: Mypy
+        run: mypy app
       - name: Tests (pokud existuji)
         run: |
           if [ -d tests ] || [ -d app/tests ]; then
