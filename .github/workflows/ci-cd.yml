@@ -51,7 +51,17 @@ jobs:
             git fetch origin main
             git checkout main
             git reset --hard origin/main
+            DEPLOY_TAG=$(git rev-parse --short HEAD)
             rsync -a --delete --exclude='.git' /srv/hcasc/_repos/dagmar-backend/ /opt/dagmar/backend/
+            if [ -f /etc/dagmar/backend.env ]; then
+              if grep -q '^DAGMAR_DEPLOY_TAG=' /etc/dagmar/backend.env; then
+                sed -i "s/^DAGMAR_DEPLOY_TAG=.*/DAGMAR_DEPLOY_TAG=${DEPLOY_TAG}/" /etc/dagmar/backend.env
+              else
+                echo "DAGMAR_DEPLOY_TAG=${DEPLOY_TAG}" >> /etc/dagmar/backend.env
+              fi
+            else
+              echo "DAGMAR_DEPLOY_TAG=${DEPLOY_TAG}" > /etc/dagmar/backend.env
+            fi
             if [ ! -d /opt/dagmar/backend/.venv ]; then
               python3 -m venv /opt/dagmar/backend/.venv
             fi
