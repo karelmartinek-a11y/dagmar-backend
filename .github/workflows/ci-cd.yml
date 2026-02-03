@@ -33,7 +33,8 @@ jobs:
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    # Dočasně vypnuto (problematické secrets na CI); reaktivujte změnou na "github.ref == 'refs/heads/main'".
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - name: Skip deploy (missing secrets)
