@@ -180,4 +180,3 @@ Krátký seznam endpointů:
 3. **Admin login nefunguje (CSRF/session)**
    - ověřte, že používáte HTTPS a cookie má `Secure`
    - ověřte, že Nginx posílá správné `X-Forwarded-Proto https`
-\nTest trigger deploy 2026-02-03 15:20:34Z
