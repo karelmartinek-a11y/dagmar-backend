@@ -56,7 +56,7 @@ class Instance(Base):
         String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
     )
     # volitelny odkaz na profilovou instanci
-    profile_instance: Mapped["Instance"] | None = relationship(
+    profile_instance: Mapped[Instance] | None = relationship(
         "Instance",
         remote_side=[id],
         foreign_keys=[profile_instance_id],

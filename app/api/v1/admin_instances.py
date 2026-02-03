@@ -8,7 +8,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...db.models import Attendance, AttendanceLock, EmploymentTemplate, Instance, InstanceStatus, ShiftPlan, ShiftPlanMonthInstance
+from ...db.models import (
+    Attendance,
+    AttendanceLock,
+    EmploymentTemplate,
+    Instance,
+    InstanceStatus,
+    ShiftPlan,
+    ShiftPlanMonthInstance,
+)
 from ...security.csrf import require_csrf
 from ..deps import get_db, require_admin
 
