@@ -46,7 +46,8 @@ jobs:
           fi
       - name: Skip deploy (missing secrets)
         if: steps.check_secrets.outputs.missing == 'true'
-        run: echo "Skipping deploy: secrets not configured."
+        run: |
+          echo "Skipping deploy: secrets not configured."
       - name: Deploy to production server
         if: steps.check_secrets.outputs.missing == 'false'
         uses: appleboy/ssh-action@v1.2.0
@@ -83,3 +84,4 @@ jobs:
             systemctl restart dagmar-backend
             cd /opt/dagmar/sandbox && ./run-tests.sh
             printf '%s DAGMAR backend: auto-deploy main\n' \"$(date '+%F %T')\" >> /var/log/dagmar/deploy.log
+
