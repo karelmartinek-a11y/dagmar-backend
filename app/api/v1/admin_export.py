@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from ...db.models import Attendance, Instance
 from ...db.session import get_db
 from ...utils.slugify import filename_safe
-from ..deps import require_admin
+from ..deps import require_admin, resolve_profile_instance
 
 router = APIRouter(tags=["admin"])
 
@@ -116,9 +116,11 @@ def export_csv_or_zip(
         if not instance:
             raise HTTPException(status_code=404, detail="Instance not found")
 
-        display = instance.display_name or f"instance_{instance.id}"
+        profile = resolve_profile_instance(db, instance)
+
+        display = profile.display_name or f"instance_{profile.id}"
         fname = f"{filename_safe(display)}_{month}.csv"
-        content = _csv_for_instance(db=db, instance=instance, start=start, end=end)
+        content = _csv_for_instance(db=db, instance=profile, start=start, end=end)
 
         return StreamingResponse(
             _iter_bytes(content),
@@ -128,6 +130,15 @@ def export_csv_or_zip(
 
     # bulk=true
     instances = db.execute(select(Instance).order_by(Instance.created_at.asc())).scalars().all()
+    profiles = []
+    seen = set()
+    for inst in instances:
+        profile = resolve_profile_instance(db, inst)
+        if profile.id in seen:
+            continue
+        seen.add(profile.id)
+        profiles.append(profile)
+    instances = profiles
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:

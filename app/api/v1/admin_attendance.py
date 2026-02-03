@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import require_admin, resolve_profile_instance
 from app.db.models import Attendance, AttendanceLock, Instance, ShiftPlan
 from app.db.session import get_db
 from app.security.csrf import require_csrf
@@ -72,11 +72,13 @@ def admin_get_month_attendance(
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
 
+    profile = resolve_profile_instance(db, inst)
+
     start, end = _month_range(year, month)
 
     rows = db.execute(
         select(Attendance)
-        .where(Attendance.instance_id == inst.id)
+        .where(Attendance.instance_id == profile.id)
         .where(Attendance.date >= start)
         .where(Attendance.date < end)
         .order_by(Attendance.date.asc())
@@ -88,7 +90,7 @@ def admin_get_month_attendance(
     try:
         plan_rows = db.execute(
             select(ShiftPlan)
-            .where(ShiftPlan.instance_id == inst.id)
+            .where(ShiftPlan.instance_id == profile.id)
             .where(ShiftPlan.date >= start)
             .where(ShiftPlan.date < end)
         ).scalars().all()
@@ -118,7 +120,7 @@ def admin_get_month_attendance(
         locked = (
             db.execute(
                 select(AttendanceLock).where(
-                    AttendanceLock.instance_id == inst.id,
+                    AttendanceLock.instance_id == profile.id,
                     AttendanceLock.year == year,
                     AttendanceLock.month == month,
                 )
@@ -142,6 +144,8 @@ def admin_upsert_attendance(
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
 
+    profile = resolve_profile_instance(db, inst)
+
     # Validate date
     try:
         day = parse_yyyy_mm_dd(body.date)
@@ -157,14 +161,14 @@ def admin_upsert_attendance(
 
     existing = db.execute(
         select(Attendance).where(
-            Attendance.instance_id == inst.id,
+            Attendance.instance_id == profile.id,
             Attendance.date == day,
         )
     ).scalar_one_or_none()
 
     if existing is None:
         existing = Attendance(
-            instance_id=inst.id,
+            instance_id=profile.id,
             date=day,
             arrival_time=arrival,
             departure_time=departure,
@@ -189,16 +193,18 @@ def lock_month(
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
 
+    profile = resolve_profile_instance(db, inst)
+
     existing = db.execute(
         select(AttendanceLock).where(
-            AttendanceLock.instance_id == inst.id,
+            AttendanceLock.instance_id == profile.id,
             AttendanceLock.year == body.year,
             AttendanceLock.month == body.month,
         )
     ).scalar_one_or_none()
     if existing is None:
         lock = AttendanceLock(
-            instance_id=inst.id,
+            instance_id=profile.id,
             year=body.year,
             month=body.month,
             locked_by=admin.username or None,
@@ -220,9 +226,11 @@ def unlock_month(
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
 
+    profile = resolve_profile_instance(db, inst)
+
     lock = db.execute(
         select(AttendanceLock).where(
-            AttendanceLock.instance_id == inst.id,
+            AttendanceLock.instance_id == profile.id,
             AttendanceLock.year == body.year,
             AttendanceLock.month == body.month,
         )

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, resolve_profile_instance
 from app.db.models import AppSettings, EmploymentTemplate, Instance, InstanceStatus
 from app.security.rate_limit import rate_limit
 from app.security.tokens import issue_instance_token_once, rotate_instance_token
@@ -173,17 +173,18 @@ def get_status(instance_id: str, request: Request, response: Response, db: Sessi
         return InstanceStatusOutDeactivated(status="DEACTIVATED")
 
     # ACTIVE
-    if not inst.display_name:
+    profile = resolve_profile_instance(db, inst)
+    if not profile.display_name:
         # Defensive: ACTIVE bez jména -> doplníme náhradní label a pustíme dál.
-        inst.display_name = f"Zařízení {inst.id[:8]}"
-        db.add(inst)
+        profile.display_name = f"Zařízení {profile.id[:8]}"
+        db.add(profile)
         db.commit()
 
     settings = _get_settings(db)
     return InstanceStatusOutActive(
         status="ACTIVE",
-        display_name=inst.display_name,
-        employment_template=_normalize_employment_template(inst.employment_template),
+        display_name=profile.display_name,
+        employment_template=_normalize_employment_template(profile.employment_template),
         afternoon_cutoff=_minutes_to_hhmm(settings.afternoon_cutoff_minutes),
     )
 
@@ -210,7 +211,8 @@ def claim_token(instance_id: str, request: Request, response: Response, db: Sess
         db.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Instance not active")
 
-    if not inst.display_name:
+    profile = resolve_profile_instance(db, inst)
+    if not profile.display_name:
         db.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Instance misconfigured")
 
@@ -220,4 +222,4 @@ def claim_token(instance_id: str, request: Request, response: Response, db: Sess
         token = rotate_instance_token(db, inst)
     db.commit()
 
-    return ClaimTokenOut(instance_token=token, display_name=inst.display_name)
+    return ClaimTokenOut(instance_token=token, display_name=profile.display_name)

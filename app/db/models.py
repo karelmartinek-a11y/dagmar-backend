@@ -52,6 +52,14 @@ class Instance(Base):
         Enum(InstanceStatus, name="instance_status", create_type=False), nullable=False, default=InstanceStatus.PENDING
     )
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    profile_instance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
+    )
+    profile_instance: Mapped["Instance" | None] = relationship(
+        "Instance",
+        remote_side=[id],
+        foreign_keys=[profile_instance_id],
+    )
     shift_plans = relationship("ShiftPlan", back_populates="instance", cascade="all, delete-orphan")
     shift_plan_month_instances = relationship("ShiftPlanMonthInstance", back_populates="instance", cascade="all, delete-orphan")
 
@@ -82,6 +90,7 @@ class Instance(Base):
     __table_args__ = (
         Index("ix_instances_status", "status"),
         Index("ix_instances_last_seen_at", "last_seen_at"),
+        Index("ix_instances_profile_instance_id", "profile_instance_id"),
     )
 
 

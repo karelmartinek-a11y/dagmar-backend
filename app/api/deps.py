@@ -81,3 +81,11 @@ def require_instance_by_id(
     if not inst:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Instance not found")
     return inst
+
+
+def resolve_profile_instance(db: Session, inst: models.Instance) -> models.Instance:
+    if inst.profile_instance_id:
+        profile = db.get(models.Instance, inst.profile_instance_id)
+        if profile is not None:
+            return profile
+    return inst

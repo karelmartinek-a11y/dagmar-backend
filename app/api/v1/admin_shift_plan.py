@@ -12,7 +12,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import require_admin, resolve_profile_instance
 from app.db.models import Base, Instance, InstanceStatus, ShiftPlan, ShiftPlanMonthInstance
 from app.db.session import get_db
 from app.security.csrf import require_csrf
@@ -65,6 +65,18 @@ class OkOut(BaseModel):
     ok: bool = True
 
 
+def _dedupe_profile_instances(db: Session, instances: list[Instance]) -> list[Instance]:
+    seen: set[str] = set()
+    result: list[Instance] = []
+    for inst in instances:
+        profile = resolve_profile_instance(db, inst)
+        if profile.id in seen:
+            continue
+        seen.add(profile.id)
+        result.append(profile)
+    return result
+
+
 def _month_range(year: int, month: int) -> tuple[dt.date, dt.date]:
     if month < 1 or month > 12:
         raise ValueError("month out of range")
@@ -90,6 +102,7 @@ def admin_get_shift_plan_month(
             .where(Instance.status == InstanceStatus.ACTIVE)
             .order_by(Instance.display_name.asc(), Instance.created_at.asc())
         ).scalars().all()
+        active_instances = _dedupe_profile_instances(db, active_instances)
     except SQLAlchemyError as e:
         logging.getLogger(__name__).warning("Instance query failed: %s", e)
         active_instances = []
@@ -137,6 +150,7 @@ def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int, acti
             .where(Instance.status == InstanceStatus.ACTIVE)
             .order_by(Instance.display_name.asc(), Instance.created_at.asc())
         ).scalars().all()
+        active_instances = _dedupe_profile_instances(db, active_instances)
 
     active_out = [
         ActiveInstanceOut(id=i.id, display_name=i.display_name, employment_template=i.employment_template) for i in active_instances
@@ -148,7 +162,17 @@ def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int, acti
         .where(ShiftPlanMonthInstance.month == month)
         .order_by(ShiftPlanMonthInstance.id.asc())
     ).scalars().all()
-    selected_ids = [s.instance_id for s in selected]
+    selected_ids: list[str] = []
+    selected_seen: set[str] = set()
+    for s in selected:
+        inst = db.get(Instance, s.instance_id)
+        if not inst:
+            continue
+        profile = resolve_profile_instance(db, inst)
+        if profile.id in selected_seen:
+            continue
+        selected_seen.add(profile.id)
+        selected_ids.append(profile.id)
 
     if not selected_ids:
         return ShiftPlanMonthOut(year=year, month=month, selected_instance_ids=[], active_instances=active_out, rows=[])
@@ -213,6 +237,7 @@ def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut
     inst = db.get(Instance, body.instance_id)
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
+    profile = resolve_profile_instance(db, inst)
 
     try:
         day = parse_yyyy_mm_dd(body.date)
@@ -227,7 +252,7 @@ def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut
 
     existing = db.execute(
         select(ShiftPlan).where(
-            ShiftPlan.instance_id == inst.id,
+            ShiftPlan.instance_id == profile.id,
             ShiftPlan.date == day,
         )
     ).scalar_one_or_none()
@@ -240,7 +265,7 @@ def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut
         return OkOut(ok=True)
 
     if existing is None:
-        existing = ShiftPlan(instance_id=inst.id, date=day, arrival_time=arrival, departure_time=departure)
+        existing = ShiftPlan(instance_id=profile.id, date=day, arrival_time=arrival, departure_time=departure)
         db.add(existing)
     else:
         existing.arrival_time = arrival
@@ -266,14 +291,26 @@ def admin_set_shift_plan_selection(
 
 def _admin_set_shift_plan_selection_impl(db: Session, body: ShiftPlanSelectionIn) -> OkOut:
     _ensure_shift_plan_tables(db)
-    # Keep order, remove duplicates & empties.
+    # Keep order, map na profil, remove duplicates & empties.
     uniq: list[str] = []
     seen: set[str] = set()
+    missing: list[str] = []
     for iid in body.instance_ids:
-        if not iid or iid in seen:
+        if not iid:
             continue
-        seen.add(iid)
-        uniq.append(iid)
+        inst = db.get(Instance, iid)
+        if not inst:
+            missing.append(iid)
+            continue
+        profile = resolve_profile_instance(db, inst)
+        pid = profile.id
+        if pid in seen:
+            continue
+        seen.add(pid)
+        uniq.append(pid)
+
+    if missing:
+        raise HTTPException(status_code=400, detail="Some instances were not found")
 
     if uniq:
         active_ids = set(
@@ -283,8 +320,8 @@ def _admin_set_shift_plan_selection_impl(db: Session, body: ShiftPlanSelectionIn
                 .where(Instance.id.in_(uniq))
             ).scalars().all()
         )
-        missing = [iid for iid in uniq if iid not in active_ids]
-        if missing:
+        missing_active = [iid for iid in uniq if iid not in active_ids]
+        if missing_active:
             raise HTTPException(status_code=400, detail="Some instances are not ACTIVE or were not found")
 
     db.execute(

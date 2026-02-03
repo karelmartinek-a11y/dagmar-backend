@@ -12,7 +12,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_instance
+from app.api.deps import require_instance, resolve_profile_instance
 from app.db.models import Attendance, AttendanceLock, Base, Instance, ShiftPlan
 from app.db.session import get_db
 from app.utils.timeparse import parse_hhmm_or_none
@@ -74,8 +74,9 @@ def get_month_attendance(
 ) -> AttendanceMonthOut:
     _ensure_shift_plan_tables(db)
     start, end = _month_range(year, month)
+    profile = resolve_profile_instance(db, inst)
 
-    if _is_locked(db, inst.id, year, month):
+    if _is_locked(db, profile.id, year, month):
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail={"code": "ATTENDANCE_MONTH_LOCKED", "message": "Docházka pro tento měsíc je uzavřená administrátorem."},
@@ -83,7 +84,7 @@ def get_month_attendance(
 
     rows = db.execute(
         select(Attendance)
-        .where(Attendance.instance_id == inst.id)
+        .where(Attendance.instance_id == profile.id)
         .where(Attendance.date >= start)
         .where(Attendance.date < end)
         .order_by(Attendance.date.asc())
@@ -95,7 +96,7 @@ def get_month_attendance(
     try:
         plan_rows = db.execute(
             select(ShiftPlan)
-            .where(ShiftPlan.instance_id == inst.id)
+            .where(ShiftPlan.instance_id == profile.id)
             .where(ShiftPlan.date >= start)
             .where(ShiftPlan.date < end)
         ).scalars().all()
@@ -119,7 +120,7 @@ def get_month_attendance(
         )
         cur = cur + dt.timedelta(days=1)
 
-    display_name = inst.display_name or f"Zařízení {inst.id[:8]}"
+    display_name = profile.display_name or f"Zařízení {profile.id[:8]}"
 
     return AttendanceMonthOut(days=days, instance_display_name=display_name)
 
@@ -161,7 +162,8 @@ def upsert_attendance(
         day = dt.date.fromisoformat(body.date)
     except ValueError as e:
         raise ValueError("Invalid date format, expected YYYY-MM-DD") from e
-    if _is_locked(db, inst.id, day.year, day.month):
+    profile = resolve_profile_instance(db, inst)
+    if _is_locked(db, profile.id, day.year, day.month):
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail={"code": "ATTENDANCE_MONTH_LOCKED", "message": "Docházka pro tento měsíc je uzavřená administrátorem."},
@@ -177,14 +179,14 @@ def upsert_attendance(
     # Upsert
     existing = db.execute(
         select(Attendance).where(
-            Attendance.instance_id == inst.id,
+            Attendance.instance_id == profile.id,
             Attendance.date == day,
         )
     ).scalar_one_or_none()
 
     if existing is None:
         existing = Attendance(
-            instance_id=inst.id,
+            instance_id=profile.id,
             date=day,
             arrival_time=arrival,
             departure_time=departure,
