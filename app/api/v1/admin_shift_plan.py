@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import cast
+from typing import Sequence, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -65,7 +65,7 @@ class OkOut(BaseModel):
     ok: bool = True
 
 
-def _dedupe_profile_instances(db: Session, instances: list[Instance]) -> list[Instance]:
+def _dedupe_profile_instances(db: Session, instances: Sequence[Instance]) -> list[Instance]:
     seen: set[str] = set()
     result: list[Instance] = []
     for inst in instances:
