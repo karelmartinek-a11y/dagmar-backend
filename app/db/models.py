@@ -55,8 +55,8 @@ class Instance(Base):
     profile_instance_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
     )
-    # self-reference optional link to profile instance
-    profile_instance: Mapped["Instance | None"] = relationship(
+    # volitelny odkaz na profilovou instanci
+    profile_instance: Mapped["Instance"] | None = relationship(
         "Instance",
         remote_side=[id],
         foreign_keys=[profile_instance_id],

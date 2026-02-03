@@ -1,4 +1,4 @@
-﻿"""add profile instance link
+"""add profile instance link
 
 Revision ID: 0004
 Revises: 0003
