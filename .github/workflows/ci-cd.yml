@@ -34,7 +34,7 @@ jobs:
   deploy:
     needs: build
     # Spouštět deploy jen pokud běžíme na mainu a jsou k dispozici všechny tajné údaje.
-    if: github.ref == 'refs/heads/main' && secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_PASS != ''
+    if: ${{ github.ref == 'refs/heads/main' && secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_PASS != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to production server
