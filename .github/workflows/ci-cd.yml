@@ -1,4 +1,4 @@
-name: CI/CD
+﻿name: CI/CD
 
 on:
   push:
@@ -21,6 +21,10 @@ jobs:
         run: python -m compileall app
       - name: Ruff lint
         run: ruff check app
+      - name: Security audit (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit
       - name: Mypy
         run: mypy app
       - name: Tests (pokud existuji)
@@ -84,4 +88,5 @@ jobs:
             systemctl restart dagmar-backend
             cd /opt/dagmar/sandbox && ./run-tests.sh
             printf '%s DAGMAR backend: auto-deploy main\n' \"$(date '+%F %T')\" >> /var/log/dagmar/deploy.log
+
 
