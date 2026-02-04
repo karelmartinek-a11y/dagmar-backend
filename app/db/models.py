@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import enum
 from datetime import date, datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     Date,
@@ -22,19 +22,19 @@ class Base(DeclarativeBase):
     pass
 
 
-class InstanceStatus(str, enum.Enum):
+class InstanceStatus(StrEnum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     REVOKED = "REVOKED"
     DEACTIVATED = "DEACTIVATED"
 
 
-class EmploymentTemplate(str, enum.Enum):
+class EmploymentTemplate(StrEnum):
     DPP_DPC = "DPP_DPC"
     HPP = "HPP"
 
 
-class ClientType(str, enum.Enum):
+class ClientType(StrEnum):
     ANDROID = "ANDROID"
     WEB = "WEB"
 
