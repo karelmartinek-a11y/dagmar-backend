@@ -4,6 +4,7 @@ from datetime import date, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Enum,
@@ -37,6 +38,10 @@ class EmploymentTemplate(StrEnum):
 class ClientType(StrEnum):
     ANDROID = "ANDROID"
     WEB = "WEB"
+
+
+class PortalUserRole(StrEnum):
+    EMPLOYEE = "employee"
 
 
 class Instance(Base):
@@ -205,6 +210,46 @@ class AdminUser(Base):
     )
 
 
+class PortalUser(Base):
+    __tablename__ = "portal_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    role: Mapped[PortalUserRole] = mapped_column(
+        Enum(PortalUserRole, name="portal_user_role", create_type=False), nullable=False
+    )
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+    instance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
+    )
+    instance: Mapped[Instance | None] = relationship("Instance")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    reset_tokens: Mapped[list["PortalUserResetToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class PortalUserResetToken(Base):
+    __tablename__ = "portal_user_reset_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("portal_users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    user: Mapped[PortalUser] = relationship(back_populates="reset_tokens")
+
+
 class AppSettings(Base):
     __tablename__ = "app_settings"
 
@@ -212,3 +257,12 @@ class AppSettings(Base):
     afternoon_cutoff_minutes: Mapped[int] = mapped_column(
         Integer, nullable=False, default=17 * 60, server_default=str(17 * 60)
     )
+
+    smtp_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    smtp_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_password: Mapped[str | None] = mapped_column(Text, nullable=True)
+    smtp_security: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    smtp_from_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_from_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -137,21 +137,7 @@ def register_instance(
         db.commit()
         return InstanceRegisterOut(instance_id=reusable.id, status=reusable.status.value)
 
-    inst = Instance(
-        id=str(uuid.uuid4()),
-        client_type=payload.client_type,
-        device_fingerprint=payload.device_fingerprint,
-        device_info_json=json.dumps(payload.device_info) if payload.device_info else None,
-        status=InstanceStatus.PENDING,
-        display_name=display_name,
-        employment_template=EmploymentTemplate.DPP_DPC.value,
-        created_at=_utcnow(),
-        last_seen_at=_utcnow(),
-    )
-    db.add(inst)
-    db.commit()
-
-    return InstanceRegisterOut(instance_id=inst.id, status=inst.status.value)
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="REGISTRATION_DISABLED")
 
 
 @router.get("/{instance_id}/status", response_model=InstanceStatusOut)

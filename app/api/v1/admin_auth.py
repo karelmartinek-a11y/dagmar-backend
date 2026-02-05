@@ -17,6 +17,8 @@ from app.security.sessions import (
 
 router = APIRouter(tags=["admin"])
 
+ADMIN_EMAIL = "provoz@hotelchodovasc.cz"
+
 
 class AdminLoginBody(BaseModel):
     username: str | None = Field(default=None, min_length=1, max_length=128)
@@ -53,7 +55,7 @@ async def admin_login(
 
     # Prevent timing attacks on username checks by always doing hash verify
     # when a hash is configured.
-    configured_user = settings.admin_username
+    configured_user = ADMIN_EMAIL
     configured_hash = settings.admin_password_hash
 
     if not configured_hash:
@@ -88,7 +90,7 @@ async def admin_login(
     if not payload:
         raise HTTPException(status_code=400, detail="Vyplňte uživatelské jméno a heslo.")
 
-    username = (payload.username or settings.admin_username or "").strip()
+    username = (payload.username or "").strip().lower()
     if not username or not payload.password:
         raise HTTPException(status_code=400, detail="Vyplňte uživatelské jméno a heslo.")
 
