@@ -11,12 +11,12 @@ from starlette.responses import JSONResponse
 
 from app.api.v1.admin_attendance import router as admin_attendance_router
 from app.api.v1.admin_auth import router as admin_auth_router
-from app.api.v1.admin_smtp import router as admin_smtp_router
-from app.api.v1.admin_users import router as admin_users_router
 from app.api.v1.admin_export import router as admin_export_router
 from app.api.v1.admin_instances import router as admin_instances_router
 from app.api.v1.admin_settings import router as admin_settings_router
 from app.api.v1.admin_shift_plan import router as admin_shift_plan_router
+from app.api.v1.admin_smtp import router as admin_smtp_router
+from app.api.v1.admin_users import router as admin_users_router
 from app.api.v1.attendance import router as attendance_router
 from app.api.v1.instances import router as instances_router
 from app.api.v1.portal_auth import router as portal_auth_router

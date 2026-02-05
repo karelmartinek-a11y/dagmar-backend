@@ -8,8 +8,8 @@ Create Date: 2026-02-05 00:00:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import ENUM
 from alembic import op
+from sqlalchemy.dialects.postgresql import ENUM
 
 revision: str = "0005"
 down_revision: str | None = "0004"

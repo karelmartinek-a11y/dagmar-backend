@@ -1,15 +1,22 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import hashlib
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AppSettings, Instance, InstanceStatus, PortalUser, PortalUserResetToken, PortalUserRole
+from app.db.models import (
+    AppSettings,
+    Instance,
+    InstanceStatus,
+    PortalUser,
+    PortalUserResetToken,
+    PortalUserRole,
+)
 from app.db.session import get_db
 from app.security.passwords import hash_password, verify_password
 from app.security.tokens import issue_instance_token_once, rotate_instance_token

@@ -1,10 +1,10 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import hashlib
 import secrets
 import smtplib
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from uuid import uuid4
 
@@ -15,7 +15,15 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
 from app.config import Settings, get_settings
-from app.db.models import AppSettings, ClientType, Instance, InstanceStatus, PortalUser, PortalUserResetToken, PortalUserRole
+from app.db.models import (
+    AppSettings,
+    ClientType,
+    Instance,
+    InstanceStatus,
+    PortalUser,
+    PortalUserResetToken,
+    PortalUserRole,
+)
 from app.db.session import get_db
 from app.security.csrf import require_csrf
 
@@ -73,14 +81,15 @@ def _send_reset_email(*, settings: Settings, cfg: AppSettings, to_email: str, re
     msg["From"] = f"{cfg.smtp_from_name} <{from_email}>" if cfg.smtp_from_name else from_email
     msg["To"] = to_email
     msg.set_content(
-        (
+        
             "Dobrý den,\n\n"
             "pro nastavení nebo změnu hesla použijte tento odkaz (platnost 24 hodin):\n\n"
-            "{url}\n\n"
+            f"{reset_url}\n\n"
             "Pokud jste o změnu nežádali, ignorujte tento e-mail."
-        ).format(url=reset_url)
+        
     )
 
+    server: smtplib.SMTP
     if security == "SSL":
         server = smtplib.SMTP_SSL(host, int(cfg.smtp_port), timeout=20)
     else:

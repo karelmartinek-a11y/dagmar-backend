@@ -232,7 +232,7 @@ class PortalUser(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    reset_tokens: Mapped[list["PortalUserResetToken"]] = relationship(
+    reset_tokens: Mapped[list[PortalUserResetToken]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
 
