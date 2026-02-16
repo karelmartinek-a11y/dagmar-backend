@@ -4,7 +4,7 @@ Requirements (Section A.6 + B):
 - Rate limit at minimum for:
   - admin login
   - instance status polling
-  - instance claim-token polling
+  - instance claim token polling
 
 Implementation notes:
 - We implement an in-process, per-worker limiter using SlowAPI.
@@ -82,7 +82,7 @@ class DagmarRateLimits:
     # Admin login brute-force protection
     ADMIN_LOGIN = "5/minute"
 
-    # Instance polling endpoints (status & claim-token)
+    # Instance polling endpoints (status & claim token)
     INSTANCE_STATUS = "30/minute"
     INSTANCE_CLAIM_TOKEN = "20/minute"
 
@@ -104,7 +104,7 @@ def limit_instance_status(route_limit: str | None = None):
 
 
 def limit_instance_claim_token(route_limit: str | None = None):
-    """Decorator for instance claim-token polling endpoint."""
+    """Decorator for instance claim token polling endpoint."""
 
     return limiter.limit(route_limit or DagmarRateLimits.INSTANCE_CLAIM_TOKEN)
 
