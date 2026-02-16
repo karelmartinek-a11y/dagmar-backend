@@ -1,5 +1,0 @@
-[2026-01-27 03:34:42] START: patch=C:\GitHub\dagmar-backend\BackDagmar_Q.DIFF target=C:\GitHub\dagmar-backend
-[2026-01-27 03:34:42] Detekce kořene patch: strip_count=0 (scores={0: 2, 1: 0, 2: 0, 3: 0}).
-[2026-01-27 03:34:42] Hunk 1: OK v řádku 7 (fuzz=1, ignore_trailing_ws=True, ignore_leading_ws=False, 12 řádků -> 12 řádků).
-[2026-01-27 03:34:42] WRITE: app/db/models.py
-[2026-01-27 03:34:42] DONE: {'files_total': 1, 'files_changed': 1, 'files_created': 0, 'files_deleted': 0, 'files_skipped_binary': 0, 'errors': 0, 'hunks_applied': 1}
