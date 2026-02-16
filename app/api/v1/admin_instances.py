@@ -200,7 +200,7 @@ def activate_instance(
     # Re-activation clears previous deactivation timestamp.
     inst.deactivated_at = None
 
-    # Token issuance is handled by claim-token endpoint; activation only flips state + name.
+    # Token issuance is handled by claim token endpoint; activation only flips state + name.
     inst.activated_at = datetime.now(UTC)
 
     db.add(inst)

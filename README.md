@@ -1,6 +1,6 @@
-# DAGMAR Backend (FastAPI)
+# KájovoDagmar docházkový systém — Backend (FastAPI)
 
-Backend pro docházkový systém DAGMAR.
+Backend pro KájovoDagmar docházkový systém.
 
 - Kanonická doména: **dagmar.hcasc.cz**
 - API base path: **/api/v1/**
@@ -15,17 +15,13 @@ Backend pro docházkový systém DAGMAR.
 
 Backend implementuje:
 
-- registraci instancí (WEB/ANDROID) a jejich lifecycle **PENDING → ACTIVE → REVOKED**
-- vydání instance tokenu (Bearer) až po aktivaci administrátorem
+- portal přihlášení zaměstnance (e-mail + heslo) a vydání bearer tokenu
 - docházku (arrival/departure po dnech) s upsertem
 - admin přihlášení přes **session cookie** + **CSRF** ochranu
 - exporty:
   - CSV pro konkrétní instanci a měsíc
   - ZIP s více CSV pro všechny instance a měsíc
-- rate limiting pro:
-  - admin login
-  - status polling instancí
-  - claim-token polling instancí
+- rate limiting pro admin login a API provoz
 
 ---
 
@@ -109,16 +105,10 @@ curl -sS http://127.0.0.1:8101/api/v1/health | jq
 
 ## 4) Bezpečnostní model
 
-### 4.1 Instance (zaměstnanec)
+### 4.1 Zaměstnanec (portal login)
 
-- klient vytvoří instanci přes:
-  - `POST /api/v1/instances/register`
-- do aktivace je instance **PENDING** a nemá přístup k docházce
-- admin aktivuje instanci a backend umožní vydat token přes:
-  - `POST /api/v1/instances/{instance_id}/claim-token`
-- instance používá Bearer token pro docházku:
-  - `Authorization: Bearer <instance_token>`
-- token se ukládá v DB **pouze jako hash**
+- zaměstnanec se přihlašuje přes portal endpoint (`/api/v1/portal/login`)
+- po ověření e-mailu a hesla backend vydá bearer token pro attendance API
 
 ### 4.2 Admin
 
@@ -133,11 +123,6 @@ curl -sS http://127.0.0.1:8101/api/v1/health | jq
 Detailní kontrakt a příklady jsou v `../docs/API.md`.
 
 Krátký seznam endpointů:
-
-- Instances:
-  - `POST /api/v1/instances/register`
-  - `GET /api/v1/instances/{instance_id}/status`
-  - `POST /api/v1/instances/{instance_id}/claim-token`
 
 - Attendance:
   - `GET /api/v1/attendance?year=YYYY&month=MM`
