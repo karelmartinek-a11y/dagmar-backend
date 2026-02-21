@@ -3,17 +3,15 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import Table, inspect, select
-from sqlalchemy.engine import Connection
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_instance, resolve_profile_instance
-from app.db.models import Attendance, AttendanceLock, Base, Instance, ShiftPlan
+from app.db.models import Attendance, AttendanceLock, Instance, ShiftPlan
 from app.db.session import get_db
 from app.utils.timeparse import parse_hhmm_or_none
 
@@ -72,7 +70,6 @@ def get_month_attendance(
     db: Session = Depends(get_db),
     inst: Instance = Depends(require_instance),
 ) -> AttendanceMonthOut:
-    _ensure_shift_plan_tables(db)
     start, end = _month_range(year, month)
     profile = resolve_profile_instance(db, inst)
 
@@ -123,32 +120,6 @@ def get_month_attendance(
     display_name = profile.display_name or f"Zařízení {profile.id[:8]}"
 
     return AttendanceMonthOut(days=days, instance_display_name=display_name)
-
-
-def _ensure_shift_plan_tables(db: Session) -> None:
-    try:
-        bind = cast(Connection, db.get_bind())
-        insp = inspect(bind)
-        # Zajisti, že enum typy už existují (bez duplicit) – IF NOT EXISTS zabrání kolizi.
-        bind.exec_driver_sql(
-            "DO $$ BEGIN "
-            "IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'client_type') THEN "
-            "CREATE TYPE client_type AS ENUM ('ANDROID','WEB'); END IF; "
-            "IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'instance_status') THEN "
-            "CREATE TYPE instance_status AS ENUM ('PENDING','ACTIVE','REVOKED','DEACTIVATED'); END IF; "
-            "END $$;"
-        )
-        missing: list[Table] = []
-        if not insp.has_table("shift_plan"):
-            missing.append(cast(Table, ShiftPlan.__table__))
-        if not insp.has_table("shift_plan_month_instances"):
-            month_table = Base.metadata.tables.get("shift_plan_month_instances")
-            if month_table is not None:
-                missing.append(month_table)
-        if missing:
-            Base.metadata.create_all(bind=bind, tables=missing)
-    except Exception as e:
-        logging.getLogger(__name__).warning("Unable to ensure shift plan tables (attendance): %s", e)
 
 
 @router.put("/api/v1/attendance", response_model=OkOut)

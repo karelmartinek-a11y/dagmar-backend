@@ -64,6 +64,8 @@ export DAGMAR_ALLOWED_ORIGINS="https://dagmar.hcasc.cz"
 alembic upgrade head
 ```
 
+> Poznámka (PULS-009): Runtime DDL v request flow bylo odstraněno. Pokud chybí tabulky pro shift-plan, backend je už za běhu nevytváří; musí být připravené migracemi před startem aplikace.
+
 ### 2.5 Seed admin
 
 Pro vytvoření admin účtu použijte skript v rootu projektu:
