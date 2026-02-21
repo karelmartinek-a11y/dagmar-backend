@@ -25,6 +25,7 @@ from app.db.models import (
     PortalUserRole,
 )
 from app.db.session import get_db
+from app.security.crypto import decrypt_secret
 from app.security.csrf import require_csrf
 
 router = APIRouter(prefix="/api/v1/admin/users", tags=["admin-users"])
@@ -82,7 +83,9 @@ def _send_reset_email(*, settings: Settings, cfg: AppSettings, to_email: str, re
         raise ValueError("SMTP není nastaveno.")
 
     username = (cfg.smtp_username or "").strip()
-    password = (cfg.smtp_password or "").strip() if cfg.smtp_password else None
+    smtp_secret = settings.smtp_password_secret or settings.session_secret
+    decrypted_password = decrypt_secret(cfg.smtp_password, secret=smtp_secret) if cfg.smtp_password else None
+    password = decrypted_password.strip() if decrypted_password else None
     security = (cfg.smtp_security or "SSL").strip().upper()
     from_email = (cfg.smtp_from_email or username or "").strip()
     if not from_email:

@@ -188,6 +188,18 @@ Response 200:
 
 (compat) GET `/api/v1/admin/logout` → redirect na `/admin/login`
 
+### POST `/api/v1/admin/forgot-password`
+Request:
+```json
+{ "email": "provoz@hotelchodovasc.cz" }
+```
+Response 200:
+```json
+{ "ok": true }
+```
+Pozn.: endpoint posílá pouze nápovědný e-mail pro admin účet, nikdy reset token.
+
+
 ---
 
 ## 8) Admin – Instances (session; POST/DELETE vyžaduje CSRF)

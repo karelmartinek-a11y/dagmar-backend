@@ -19,6 +19,7 @@ from app.api.v1.admin_smtp import router as admin_smtp_router
 from app.api.v1.admin_users import router as admin_users_router
 from app.api.v1.attendance import router as attendance_router
 from app.api.v1.portal_auth import router as portal_auth_router
+from app.api.v1.public_instances import router as public_instances_router
 from app.brand.brand import APP_NAME_LONG
 from app.config import Settings, get_settings
 from app.security.rate_limit import init_rate_limiting, limiter
@@ -116,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Routers already carry full prefixes ("/api/v1/..."), so include without extra prefixes
     # to avoid duplicate paths like "/api/v1/api/v1/...".
     app.include_router(attendance_router)
+    app.include_router(public_instances_router)
 
     app.include_router(admin_auth_router, tags=["admin"])
     app.include_router(admin_instances_router, tags=["admin"])
