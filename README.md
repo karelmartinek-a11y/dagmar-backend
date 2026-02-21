@@ -50,7 +50,6 @@ Pro lokální dev si můžete exportovat proměnné do shellu:
 
 ```bash
 export DAGMAR_DATABASE_URL="postgresql+psycopg://dagmar:dagmar@127.0.0.1:5433/dagmar"
-export DAGMAR_ADMIN_USERNAME="admin"
 export DAGMAR_ADMIN_PASSWORD="change-me"
 export DAGMAR_SESSION_SECRET="change-me-session-secret"
 export DAGMAR_CSRF_SECRET="change-me-csrf-secret"
@@ -115,6 +114,7 @@ curl -sS http://127.0.0.1:8101/api/v1/health | jq
 ### 4.2 Admin
 
 - `POST /api/v1/admin/login` nastaví session cookie
+- admin identita je pevně `provoz@hotelchodovasc.cz`
 - pro admin akce je povinná validní session
 - pro state-changing requesty je povinná **CSRF** ochrana
 

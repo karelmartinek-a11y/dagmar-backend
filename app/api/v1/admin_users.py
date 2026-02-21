@@ -36,8 +36,11 @@ class PortalUserOut(BaseModel):
     id: int
     name: str
     email: str
+    phone: str | None = None
     role: str
     has_password: bool
+    profile_instance_id: str | None = None
+    is_active: bool
 
 
 class PortalUserListOut(BaseModel):
@@ -48,6 +51,15 @@ class PortalUserCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     email: str = Field(min_length=3, max_length=160)
     role: str = Field(min_length=1, max_length=32)
+
+
+class PortalUserUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    email: str | None = Field(default=None, min_length=3, max_length=160)
+    phone: str | None = Field(default=None, max_length=32)
+    role: str | None = Field(default=None, min_length=1, max_length=32)
+    profile_instance_id: str | None = Field(default=None, max_length=36)
+    is_active: bool | None = None
 
 
 class OkOut(BaseModel):
@@ -105,19 +117,29 @@ def _send_reset_email(*, settings: Settings, cfg: AppSettings, to_email: str, re
         server.quit()
 
 
+def _resolve_profile_instance_id(user: PortalUser) -> str | None:
+    if not user.instance:
+        return None
+    return user.instance.profile_instance_id or user.instance_id
+
+
+def _to_user_out(user: PortalUser) -> PortalUserOut:
+    return PortalUserOut(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        phone=user.phone,
+        role=user.role.value,
+        has_password=bool(user.password_hash),
+        profile_instance_id=_resolve_profile_instance_id(user),
+        is_active=user.is_active,
+    )
+
+
 @router.get("", response_model=PortalUserListOut)
 def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
     rows = db.execute(select(PortalUser).order_by(PortalUser.name.asc())).scalars().all()
-    out = [
-        PortalUserOut(
-            id=u.id,
-            name=u.name,
-            email=u.email,
-            role=u.role.value,
-            has_password=bool(u.password_hash),
-        )
-        for u in rows
-    ]
+    out = [_to_user_out(u) for u in rows]
     return PortalUserListOut(users=out)
 
 
@@ -169,13 +191,62 @@ def create_user(
     db.commit()
     db.refresh(user)
 
-    return PortalUserOut(
-        id=user.id,
-        name=user.name,
-        email=user.email,
-        role=user.role.value,
-        has_password=bool(user.password_hash),
-    )
+    return _to_user_out(user)
+
+
+@router.put("/{user_id}", response_model=PortalUserOut)
+def update_user(
+    user_id: int,
+    payload: PortalUserUpdateIn,
+    _admin=Depends(require_admin),
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    user = db.get(PortalUser, int(user_id))
+    if user is None:
+        raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
+
+    if payload.name is not None:
+        user.name = payload.name.strip()
+
+    if payload.phone is not None:
+        raw_phone = payload.phone.strip()
+        user.phone = raw_phone or None
+
+    if payload.email is not None:
+        email = payload.email.strip().lower()
+        if email == "provoz@hotelchodovasc.cz":
+            raise HTTPException(status_code=400, detail="Tento e-mail je vyhrazen pro admin účet.")
+        if email != user.email:
+            exists = db.execute(
+                select(PortalUser).where(PortalUser.email == email).where(PortalUser.id != user.id)
+            ).scalars().first()
+            if exists:
+                raise HTTPException(status_code=409, detail="Uživatel s tímto e‑mailem už existuje.")
+        user.email = email
+
+    if payload.role is not None:
+        try:
+            user.role = PortalUserRole(payload.role)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Neplatný druh pohledu.") from None
+
+    if payload.profile_instance_id is not None:
+        profile_instance_id = payload.profile_instance_id.strip() or None
+        if profile_instance_id is not None:
+            inst = db.get(Instance, profile_instance_id)
+            if inst is None:
+                raise HTTPException(status_code=400, detail="Profilová instance neexistuje.")
+        user.instance_id = profile_instance_id
+
+    if payload.is_active is not None:
+        user.is_active = payload.is_active
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return _to_user_out(user)
 
 
 @router.post("/{user_id}/send-reset", response_model=OkOut)
