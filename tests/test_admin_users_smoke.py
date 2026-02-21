@@ -8,8 +8,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.deps import require_admin
-from app.api.v1 import admin_attendance, admin_users
+from app.api.deps import require_admin, require_instance
+from app.api.v1 import admin_users, attendance
 from app.db.models import Base, ClientType, Instance, InstanceStatus, PortalUser, PortalUserRole
 from app.security.csrf import require_csrf
 
@@ -25,7 +25,7 @@ def _build_client() -> tuple[TestClient, sessionmaker[Session]]:
 
     app = FastAPI()
     app.include_router(admin_users.router)
-    app.include_router(admin_attendance.router)
+    app.include_router(attendance.router)
 
     def override_db():
         db = TestingSessionLocal()
@@ -35,9 +35,15 @@ def _build_client() -> tuple[TestClient, sessionmaker[Session]]:
             db.close()
 
     app.dependency_overrides[admin_users.get_db] = override_db
-    app.dependency_overrides[admin_attendance.get_db] = override_db
+    app.dependency_overrides[attendance.get_db] = override_db
     app.dependency_overrides[require_admin] = lambda: {"ok": True}
     app.dependency_overrides[require_csrf] = lambda: None
+
+    def override_instance() -> Instance:
+        with TestingSessionLocal() as db:
+            return db.get(Instance, "inst-2")
+
+    app.dependency_overrides[require_instance] = override_instance
 
     return TestClient(app), TestingSessionLocal
 
@@ -85,7 +91,7 @@ def test_admin_update_user_smoke() -> None:
     assert payload["is_active"] is False
 
 
-def test_admin_attendance_invalid_date_returns_400() -> None:
+def test_attendance_invalid_date_returns_400() -> None:
     client, session_local = _build_client()
 
     with session_local() as db:
@@ -102,9 +108,8 @@ def test_admin_attendance_invalid_date_returns_400() -> None:
         db.commit()
 
     response = client.put(
-        "/api/v1/admin/attendance",
+        "/api/v1/attendance",
         json={
-            "instance_id": "inst-2",
             "date": "2026-99-99",
             "arrival_time": "08:00",
             "departure_time": "16:00",
