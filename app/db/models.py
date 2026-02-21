@@ -216,6 +216,7 @@ class PortalUser(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     role: Mapped[PortalUserRole] = mapped_column(
         Enum(PortalUserRole, name="portal_user_role", create_type=False), nullable=False
     )

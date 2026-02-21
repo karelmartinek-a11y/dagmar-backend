@@ -14,6 +14,7 @@ def _format_deploy_tag(dt: datetime) -> str:
 
 _ENV_VALUES = ("production", "staging", "development")
 _SAMESITE_VALUES = ("lax", "strict")
+ADMIN_IDENTITY_EMAIL = "provoz@hotelchodovasc.cz"
 
 
 def _coerce_environment(value: str) -> Literal["production", "staging", "development"]:
@@ -61,7 +62,7 @@ class Settings(BaseModel):
     db_pool_timeout_seconds: int = Field(default=30)
 
     # --- Admin auth (single admin account) ---
-    admin_username: str = Field(default="admin")
+    admin_username: str = Field(default=ADMIN_IDENTITY_EMAIL)
     # Provide either admin_password (to be hashed on seed) OR admin_password_hash.
     admin_password: str | None = Field(
         default=None, description="Plain password used only by seed_admin.sh"
@@ -182,7 +183,7 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
         db_pool_size=int(os.getenv("DAGMAR_DB_POOL_SIZE", "5")),
         db_max_overflow=int(os.getenv("DAGMAR_DB_MAX_OVERFLOW", "10")),
         db_pool_timeout_seconds=int(os.getenv("DAGMAR_DB_POOL_TIMEOUT_SECONDS", "30")),
-        admin_username=os.getenv("DAGMAR_ADMIN_USERNAME", "admin"),
+        admin_username=ADMIN_IDENTITY_EMAIL,
         admin_password=os.getenv("DAGMAR_ADMIN_PASSWORD") or None,
         admin_password_hash=os.getenv("DAGMAR_ADMIN_PASSWORD_HASH") or None,
         session_secret=os.environ["DAGMAR_SESSION_SECRET"],

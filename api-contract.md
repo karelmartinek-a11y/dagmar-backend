@@ -156,8 +156,9 @@ Poznámka (audit): nevalidní `date` musí vracet HTTP 400 (ne 500).
 ### POST `/api/v1/admin/login`
 Request:
 ```json
-{ "username": "string", "password": "string" }
+{ "username": "provoz@hotelchodovasc.cz", "password": "string" }
 ```
+`username` je fixní administrátorská identita `provoz@hotelchodovasc.cz`.
 Response 200:
 ```json
 { "ok": true, "csrf_token": "string" }
@@ -239,7 +240,16 @@ Response 200:
 ```json
 {
   "users": [
-    { "id": 1, "name": "string", "email": "string", "role": "employee", "has_password": false }
+    {
+      "id": 1,
+      "name": "string",
+      "email": "string",
+      "phone": "+420123456789",
+      "role": "employee",
+      "has_password": false,
+      "profile_instance_id": "uuid-or-null",
+      "is_active": true
+    }
   ]
 }
 ```
@@ -260,8 +270,8 @@ Response 200:
 { "ok": true }
 ```
 
-### (PLÁNOVANÉ – audit) PUT `/api/v1/admin/users/{user_id}`
-Request (návrh):
+### PUT `/api/v1/admin/users/{user_id}`
+Request:
 ```json
 {
   "name": "string",
@@ -272,7 +282,7 @@ Request (návrh):
   "is_active": true
 }
 ```
-Response 200 (návrh):
+Response 200:
 ```json
 {
   "id": 1,
