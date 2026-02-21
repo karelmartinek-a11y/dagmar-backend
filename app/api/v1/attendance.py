@@ -161,7 +161,10 @@ def upsert_attendance(
     try:
         day = dt.date.fromisoformat(body.date)
     except ValueError as e:
-        raise ValueError("Invalid date format, expected YYYY-MM-DD") from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid date format, expected YYYY-MM-DD",
+        ) from e
     profile = resolve_profile_instance(db, inst)
     if _is_locked(db, profile.id, day.year, day.month):
         raise HTTPException(

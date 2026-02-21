@@ -92,8 +92,10 @@ gunicorn -c gunicorn.conf.py app.main:app
 
 ## 3) Healthcheck
 
-- `GET /api/v1/health`
-  - vrací `{ "ok": true }` pokud aplikace běží a je dostupná DB
+- `GET /api/v1/health` (kanonický endpoint)
+  - vrací `{ "ok": true }`.
+- `GET /api/health` (kompatibilní alias)
+  - vrací stejné `{ "ok": true }`.
 
 Příklad:
 
