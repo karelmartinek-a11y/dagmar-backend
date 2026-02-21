@@ -91,6 +91,20 @@ gunicorn -c gunicorn.conf.py app.main:app
 
 ---
 
+
+### 2.7 Test bootstrap
+
+```bash
+pip install -e .[dev]
+PYTHONPATH=. pytest
+```
+
+Alternativně použijte helper skript:
+
+```bash
+./scripts/test.sh
+```
+
 ## 3) Healthcheck
 
 - `GET /api/v1/health` (kanonický endpoint)
@@ -124,7 +138,7 @@ curl -sS http://127.0.0.1:8101/api/v1/health | jq
 
 ## 5) API přehled (odkaz)
 
-Detailní kontrakt a příklady jsou v `../docs/API.md`.
+Detailní kontrakt a příklady jsou v `api-contract.md`.
 
 Krátký seznam endpointů:
 

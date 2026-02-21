@@ -147,8 +147,11 @@ def upsert_attendance(
     # day already parsed above
 
     # Validate times (only format/range, no other business rules)
-    arrival = parse_hhmm_or_none(body.arrival_time)
-    departure = parse_hhmm_or_none(body.departure_time)
+    try:
+        arrival = parse_hhmm_or_none(body.arrival_time)
+        departure = parse_hhmm_or_none(body.departure_time)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     # Upsert
     existing = db.execute(

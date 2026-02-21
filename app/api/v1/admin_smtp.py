@@ -9,8 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
+from app.config import Settings, get_settings
 from app.db.models import AppSettings
 from app.db.session import get_db
+from app.security.crypto import encrypt_secret
 from app.security.csrf import require_csrf
 
 router = APIRouter(prefix="/api/v1/admin/smtp", tags=["admin-smtp"])
@@ -66,6 +68,7 @@ def set_smtp(
     _admin=Depends(require_admin),
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ):
     st = _get_settings(db)
     st.smtp_host = payload.host.strip() if payload.host else None
@@ -75,7 +78,8 @@ def set_smtp(
     st.smtp_from_email = payload.from_email.strip() if payload.from_email else None
     st.smtp_from_name = payload.from_name.strip() if payload.from_name else None
     if payload.password:
-        st.smtp_password = payload.password
+        smtp_secret = settings.smtp_password_secret or settings.session_secret
+        st.smtp_password = encrypt_secret(payload.password, secret=smtp_secret)
     st.smtp_updated_at = datetime.now()
     db.add(st)
     db.commit()

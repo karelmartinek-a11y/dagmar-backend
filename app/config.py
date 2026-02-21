@@ -76,6 +76,7 @@ class Settings(BaseModel):
     # These must be set in /etc/dagmar/backend.env
     session_secret: str = Field(..., min_length=32)
     csrf_secret: str = Field(..., min_length=32)
+    smtp_password_secret: str | None = Field(default=None, min_length=32)
 
     # Cookie name for admin session.
     admin_session_cookie: str = Field(default="dagmar_admin_session")
@@ -188,6 +189,7 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
         admin_password_hash=os.getenv("DAGMAR_ADMIN_PASSWORD_HASH") or None,
         session_secret=os.environ["DAGMAR_SESSION_SECRET"],
         csrf_secret=os.environ["DAGMAR_CSRF_SECRET"],
+        smtp_password_secret=os.getenv("DAGMAR_SMTP_PASSWORD_SECRET") or None,
         admin_session_cookie=os.getenv(
             "DAGMAR_ADMIN_SESSION_COOKIE", os.getenv("DAGMAR_COOKIE_NAME", "dagmar_admin_session")
         ),
@@ -221,6 +223,3 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
     settings.ensure_canonical_domain()
     return settings
 
-
-# Provide a module-level settings instance for legacy imports.
-settings = get_settings()

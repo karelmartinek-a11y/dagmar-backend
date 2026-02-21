@@ -1,11 +1,17 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
+from email.message import EmailMessage
+import smtplib
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, ValidationError
 from starlette.responses import RedirectResponse
 
 from app.config import Settings, get_settings
+from app.db.models import AppSettings
+from app.db.session import get_db
+from app.security.crypto import decrypt_secret
 from app.security.csrf import csrf_issue_token
 from app.security.passwords import verify_password
 from app.security.rate_limit import limiter
@@ -21,6 +27,67 @@ class AdminLoginBody(BaseModel):
     username: str | None = Field(default=None, min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=256)
 
+
+
+
+class AdminForgotPasswordIn(BaseModel):
+    email: str = Field(min_length=3, max_length=160)
+
+
+def _smtp_settings(db):
+    return db.query(AppSettings).filter(AppSettings.id == 1).one_or_none()
+
+
+def _send_admin_help_email(*, settings: Settings, to_email: str, cfg: AppSettings | None) -> None:
+    if cfg is None or not cfg.smtp_host or not cfg.smtp_port:
+        return
+
+    smtp_secret = settings.smtp_password_secret or settings.session_secret
+    password = decrypt_secret(cfg.smtp_password, secret=smtp_secret) if cfg.smtp_password else None
+    username = (cfg.smtp_username or "").strip()
+    from_email = (cfg.smtp_from_email or username or "").strip()
+    if not from_email:
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = "Pomoc s přístupem do administrace DAGMAR"
+    msg["From"] = f"{cfg.smtp_from_name} <{from_email}>" if cfg.smtp_from_name else from_email
+    msg["To"] = to_email
+    msg.set_content(
+        "Dobrý den,\n\n"
+        "pro reset administrátorského hesla kontaktujte interní podporu provozu HCASC.\n"
+        "Tento e-mail úmyslně neobsahuje resetovací odkaz ani token.\n\n"
+        "DAGMAR backend"
+    )
+
+    security = (cfg.smtp_security or "SSL").strip().upper()
+    server: smtplib.SMTP
+    if security == "SSL":
+        server = smtplib.SMTP_SSL(cfg.smtp_host, int(cfg.smtp_port), timeout=20)
+    else:
+        server = smtplib.SMTP(cfg.smtp_host, int(cfg.smtp_port), timeout=20)
+        if security == "STARTTLS":
+            server.starttls()
+
+    try:
+        if username and password:
+            server.login(username, password)
+        server.send_message(msg)
+    finally:
+        server.quit()
+
+
+@router.post("/api/v1/admin/forgot-password")
+async def admin_forgot_password(
+    payload: AdminForgotPasswordIn,
+    settings: Settings = Depends(get_settings),
+    db=Depends(get_db),
+):
+    requested = payload.email.strip().lower()
+    if requested == (settings.admin_username or "").strip().lower():
+        cfg = _smtp_settings(db)
+        _send_admin_help_email(settings=settings, to_email=requested, cfg=cfg)
+    return {"ok": True}
 
 class AdminMeResponse(BaseModel):
     authenticated: bool

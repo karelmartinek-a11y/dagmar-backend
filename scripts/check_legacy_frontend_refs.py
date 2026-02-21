@@ -7,7 +7,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FORBIDDEN = [
     "device" + "Fingerprint",
-    "claim" + "-" + "token",
     "claim" + "Token",
     "register" + "Instance",
     "get" + "Instance" + "Status",

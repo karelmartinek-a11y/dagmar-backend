@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import get_settings, settings
+from app.config import get_settings
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
@@ -24,7 +24,7 @@ def get_engine() -> Engine:
     """
 
     global _engine
-    cfg = settings if settings is not None else get_settings()
+    cfg = get_settings()
 
     if _engine is None:
         # pool_pre_ping: avoid stale connections

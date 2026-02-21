@@ -117,3 +117,31 @@ def test_attendance_invalid_date_returns_400() -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_attendance_invalid_time_returns_400() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        inst = Instance(
+            id="inst-2",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-2",
+            status=InstanceStatus.ACTIVE,
+            display_name="Marie",
+            created_at=datetime.now(timezone.utc),
+            last_seen_at=datetime.now(timezone.utc),
+        )
+        db.add(inst)
+        db.commit()
+
+    response = client.put(
+        "/api/v1/attendance",
+        json={
+            "date": "2026-02-20",
+            "arrival_time": "99:00",
+            "departure_time": "16:00",
+        },
+    )
+
+    assert response.status_code == 400
