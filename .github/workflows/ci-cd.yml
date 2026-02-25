@@ -61,13 +61,14 @@ jobs:
           password: ${{ secrets.DEPLOY_PASS }}
           script: |
             set -e
+            SSH_CMD="ssh -i /root/.ssh/deploy_dagmarhotel -o IdentitiesOnly=yes"
             if [ ! -d /srv/hcasc/_repos/dagmar-backend/.git ]; then
-              git clone https://github.com/karelmartinek-a11y/dagmar-backend.git /srv/hcasc/_repos/dagmar-backend
+              GIT_SSH_COMMAND="$SSH_CMD" git clone git@github.com:karelmartinek-a11y/dagmar-backend.git /srv/hcasc/_repos/dagmar-backend
             fi
             cd /srv/hcasc/_repos/dagmar-backend
-            git fetch origin main
-            git checkout main
-            git reset --hard origin/main
+            GIT_SSH_COMMAND="$SSH_CMD" git fetch origin main
+            GIT_SSH_COMMAND="$SSH_CMD" git checkout main
+            GIT_SSH_COMMAND="$SSH_CMD" git reset --hard origin/main
             DEPLOY_TAG=$(git rev-parse --short HEAD)
             rsync -a --delete --exclude='.git' /srv/hcasc/_repos/dagmar-backend/ /opt/dagmar/backend/
             if [ -f /etc/dagmar/backend.env ]; then
@@ -88,6 +89,5 @@ jobs:
             systemctl restart dagmar-backend
             cd /opt/dagmar/sandbox && ./run-tests.sh
             printf '%s DAGMAR backend: auto-deploy main\n' \"$(date '+%F %T')\" >> /var/log/dagmar/deploy.log
-
 
 
