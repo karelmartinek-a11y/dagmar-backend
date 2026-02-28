@@ -46,7 +46,7 @@ jobs:
           missing=""
           [ -z "${{ secrets.DEPLOY_HOST }}" ] && missing="$missing DEPLOY_HOST"
           [ -z "${{ secrets.DEPLOY_USER }}" ] && missing="$missing DEPLOY_USER"
-          [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ] && missing="$missing DEPLOY_SSH_KEY"
+          [ -z "${{ secrets.DEPLOY_PASS }}" ] && missing="$missing DEPLOY_PASS"
           [ -z "${{ secrets.GITHUB_PAT }}" ] && missing="$missing GITHUB_PAT"
           if [ -n "$missing" ]; then
             echo "missing=$missing" >> $GITHUB_OUTPUT
@@ -61,7 +61,7 @@ jobs:
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          password: ${{ secrets.DEPLOY_PASS }}
           script: |
             set -e
             REPO_URL="https://x-access-token:${{ secrets.GITHUB_PAT }}@github.com/karelmartinek-a11y/dagmar-backend.git"
