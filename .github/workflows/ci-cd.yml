@@ -47,6 +47,7 @@ jobs:
           [ -z "${{ secrets.DEPLOY_HOST }}" ] && missing="$missing DEPLOY_HOST"
           [ -z "${{ secrets.DEPLOY_USER }}" ] && missing="$missing DEPLOY_USER"
           [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ] && missing="$missing DEPLOY_SSH_KEY"
+          [ -z "${{ secrets.GITHUB_PAT }}" ] && missing="$missing GITHUB_PAT"
           if [ -n "$missing" ]; then
             echo "missing=$missing" >> $GITHUB_OUTPUT
           fi
@@ -63,14 +64,14 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             set -e
-            SSH_CMD="ssh -i /root/.ssh/deploy_dagmarhotel -o IdentitiesOnly=yes"
+            REPO_URL="https://x-access-token:${{ secrets.GITHUB_PAT }}@github.com/karelmartinek-a11y/dagmar-backend.git"
             if [ ! -d /srv/hcasc/_repos/dagmar-backend/.git ]; then
-              GIT_SSH_COMMAND="$SSH_CMD" git clone git@github.com:karelmartinek-a11y/dagmar-backend.git /srv/hcasc/_repos/dagmar-backend
+              git clone "$REPO_URL" /srv/hcasc/_repos/dagmar-backend
             fi
             cd /srv/hcasc/_repos/dagmar-backend
-            GIT_SSH_COMMAND="$SSH_CMD" git fetch origin main
-            GIT_SSH_COMMAND="$SSH_CMD" git checkout main
-            GIT_SSH_COMMAND="$SSH_CMD" git reset --hard origin/main
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
             DEPLOY_TAG=$(git rev-parse --short HEAD)
             rsync -a --delete --exclude='.git' /srv/hcasc/_repos/dagmar-backend/ /opt/dagmar/backend/
             if [ -f /etc/dagmar/backend.env ]; then
