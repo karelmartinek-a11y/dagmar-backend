@@ -1,8 +1,8 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
-from email.message import EmailMessage
 import smtplib
+from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, ValidationError
