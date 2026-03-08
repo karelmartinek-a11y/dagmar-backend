@@ -87,7 +87,6 @@ jobs:
             fi
             /opt/dagmar/backend/.venv/bin/pip install --upgrade pip
             /opt/dagmar/backend/.venv/bin/pip install /opt/dagmar/backend
-            chown -R dagmar:dagmar /opt/dagmar/backend
-            systemctl restart dagmar-backend
+            sudo systemctl restart dagmar-backend
             cd /opt/dagmar/sandbox && ./run-tests.sh
             printf '%s DAGMAR backend: auto-deploy main\n' \"$(date '+%F %T')\" >> /var/log/dagmar/deploy.log
