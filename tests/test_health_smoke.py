@@ -16,3 +16,13 @@ def test_health_v1_smoke() -> None:
     response = client.get("/api/v1/health")
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_time_v1_smoke() -> None:
+    client = TestClient(app)
+    response = client.get("/api/v1/time")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["timezone"] == "Europe/Prague"
+    assert payload["source"] == "server"
+    assert "datetime" in payload

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from threading import Event, Thread
 from typing import Any, Protocol, cast
 
 from fastapi import FastAPI, Request
@@ -22,7 +23,10 @@ from app.api.v1.portal_auth import router as portal_auth_router
 from app.api.v1.public_instances import router as public_instances_router
 from app.brand.brand import APP_NAME_LONG
 from app.config import Settings, get_settings
+from app.db.session import get_sessionmaker
 from app.security.rate_limit import init_rate_limiting, limiter
+from app.services.attendance_reminders import run_attendance_reminders_once
+from app.services.prague_time import prague_time_payload
 
 
 class _LimiterWithDefaults(Protocol):
@@ -99,6 +103,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _health_payload() -> dict[str, Any]:
         return {"ok": True}
 
+    @app.on_event("startup")
+    async def startup_attendance_reminders() -> None:
+        if settings.database_url.startswith("sqlite"):
+            return
+
+        stop_event = Event()
+
+        def loop() -> None:
+            session_factory = get_sessionmaker()
+            while not stop_event.is_set():
+                run_attendance_reminders_once(settings, session_factory)
+                stop_event.wait(60)
+
+        thread = Thread(target=loop, name="attendance-reminder-worker", daemon=True)
+        thread.start()
+        app.state.attendance_reminder_stop_event = stop_event
+        app.state.attendance_reminder_thread = thread
+
+    @app.on_event("shutdown")
+    async def shutdown_attendance_reminders() -> None:
+        stop_event = getattr(app.state, "attendance_reminder_stop_event", None)
+        thread = getattr(app.state, "attendance_reminder_thread", None)
+        if stop_event is not None:
+            stop_event.set()
+        if thread is not None:
+            thread.join(timeout=2)
+
     @app.get("/api/v1/health", include_in_schema=False)
     async def health_v1() -> dict[str, Any]:
         return await _health_payload()
@@ -113,6 +144,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "backend_deploy_tag": settings.deploy_tag,
             "environment": settings.environment,
         }
+
+    @app.get("/api/v1/time", include_in_schema=False)
+    async def time_v1() -> dict[str, Any]:
+        return prague_time_payload()
 
     # Routers already carry full prefixes ("/api/v1/..."), so include without extra prefixes
     # to avoid duplicate paths like "/api/v1/api/v1/...".

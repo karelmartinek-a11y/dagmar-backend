@@ -10,19 +10,25 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
 from app.config import Settings, get_settings
 from app.db.models import (
     AppSettings,
+    Attendance,
+    AttendanceLock,
+    AttendanceReminderEvent,
     ClientType,
+    EmploymentTemplate,
     Instance,
     InstanceStatus,
     PortalUser,
     PortalUserResetToken,
     PortalUserRole,
+    ShiftPlan,
+    ShiftPlanMonthInstance,
 )
 from app.db.session import get_db
 from app.security.crypto import decrypt_secret
@@ -39,6 +45,7 @@ class PortalUserOut(BaseModel):
     email: str
     phone: str | None = None
     role: str
+    employment_template: str | None = None
     has_password: bool
     profile_instance_id: str | None = None
     is_active: bool
@@ -52,6 +59,7 @@ class PortalUserCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     email: str = Field(min_length=3, max_length=160)
     role: str = Field(min_length=1, max_length=32)
+    employment_template: str | None = Field(default=None, min_length=3, max_length=16)
 
 
 class PortalUserUpdateIn(BaseModel):
@@ -59,6 +67,7 @@ class PortalUserUpdateIn(BaseModel):
     email: str | None = Field(default=None, min_length=3, max_length=160)
     phone: str | None = Field(default=None, max_length=32)
     role: str | None = Field(default=None, min_length=1, max_length=32)
+    employment_template: str | None = Field(default=None, min_length=3, max_length=16)
     profile_instance_id: str | None = Field(default=None, max_length=36)
     is_active: bool | None = None
 
@@ -133,6 +142,7 @@ def _to_user_out(user: PortalUser) -> PortalUserOut:
         email=user.email,
         phone=user.phone,
         role=user.role.value,
+        employment_template=user.instance.employment_template if user.instance else None,
         has_password=bool(user.password_hash),
         profile_instance_id=_resolve_profile_instance_id(user),
         is_active=user.is_active,
@@ -162,6 +172,10 @@ def create_user(
     except Exception:
         raise HTTPException(status_code=400, detail="Neplatný druh pohledu.") from None
 
+    template = payload.employment_template or EmploymentTemplate.DPP_DPC.value
+    if template not in {EmploymentTemplate.DPP_DPC.value, EmploymentTemplate.HPP.value}:
+        raise HTTPException(status_code=400, detail="Neplatný druh úvazku.")
+
     exists = db.execute(select(PortalUser).where(PortalUser.email == email)).scalars().first()
     if exists:
         raise HTTPException(status_code=409, detail="Uživatel s tímto e‑mailem už existuje.")
@@ -176,7 +190,7 @@ def create_user(
             device_fingerprint=f"user:{inst_id}",
             status=InstanceStatus.ACTIVE,
             display_name=payload.name.strip(),
-            employment_template="DPP_DPC",
+            employment_template=template,
             created_at=now,
             last_seen_at=now,
             activated_at=now,
@@ -242,6 +256,15 @@ def update_user(
                 raise HTTPException(status_code=400, detail="Profilová instance neexistuje.")
         user.instance_id = profile_instance_id
 
+    if payload.employment_template is not None:
+        template = payload.employment_template.strip()
+        if template not in {EmploymentTemplate.DPP_DPC.value, EmploymentTemplate.HPP.value}:
+            raise HTTPException(status_code=400, detail="Neplatný druh úvazku.")
+        linked_instance = db.get(Instance, user.instance_id) if user.instance_id else None
+        if linked_instance is None:
+            raise HTTPException(status_code=400, detail="Uživatel nemá přiřazenou instanci pro změnu úvazku.")
+        linked_instance.employment_template = template
+
     if payload.is_active is not None:
         user.is_active = payload.is_active
 
@@ -250,6 +273,42 @@ def update_user(
     db.refresh(user)
 
     return _to_user_out(user)
+
+
+@router.delete("/{user_id}", response_model=OkOut)
+def delete_user(
+    user_id: int,
+    _admin=Depends(require_admin),
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    user = db.get(PortalUser, int(user_id))
+    if user is None:
+        raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
+
+    instance_id = user.instance_id
+    if instance_id:
+        other_links = db.execute(
+            select(PortalUser).where(PortalUser.instance_id == instance_id).where(PortalUser.id != user.id)
+        ).scalars().first()
+        if other_links is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Instanci používá více uživatelů; smazání by nebylo bezpečné.",
+            )
+
+    db.delete(user)
+    if instance_id:
+        db.execute(delete(Attendance).where(Attendance.instance_id == instance_id))
+        db.execute(delete(AttendanceLock).where(AttendanceLock.instance_id == instance_id))
+        db.execute(delete(ShiftPlan).where(ShiftPlan.instance_id == instance_id))
+        db.execute(delete(ShiftPlanMonthInstance).where(ShiftPlanMonthInstance.instance_id == instance_id))
+        db.execute(delete(AttendanceReminderEvent).where(AttendanceReminderEvent.instance_id == instance_id))
+        inst = db.get(Instance, instance_id)
+        if inst is not None:
+            db.delete(inst)
+    db.commit()
+    return OkOut(ok=True)
 
 
 @router.post("/{user_id}/send-reset", response_model=OkOut)

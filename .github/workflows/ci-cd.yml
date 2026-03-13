@@ -85,6 +85,8 @@ jobs:
             fi
             /opt/dagmar/backend/.venv/bin/pip install --upgrade pip
             /opt/dagmar/backend/.venv/bin/pip install /opt/dagmar/backend
+            cd /opt/dagmar/backend
+            /opt/dagmar/backend/.venv/bin/alembic -c /opt/dagmar/backend/app/db/alembic.ini upgrade head
             sudo systemctl restart dagmar-backend
             cd /opt/dagmar/sandbox && ./run-tests.sh
             printf '%s DAGMAR backend: auto-deploy main\n' \"$(date '+%F %T')\" >> /var/log/dagmar/deploy.log

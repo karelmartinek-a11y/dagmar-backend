@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_instance, resolve_profile_instance
 from app.db.models import Attendance, AttendanceLock, Instance, ShiftPlan
 from app.db.session import get_db
+from app.services.prague_time import prague_minutes_since_midnight, prague_today
 from app.utils.timeparse import parse_hhmm_or_none
 
 router = APIRouter(tags=["attendance"])
@@ -61,6 +62,50 @@ def _month_range(year: int, month: int) -> tuple[dt.date, dt.date]:
     else:
         end = dt.date(year, month + 1, 1)
     return start, end
+
+
+def _minutes_from_hhmm(value: str | None) -> int | None:
+    if value is None:
+        return None
+    hour, minute = value.split(":")
+    return int(hour) * 60 + int(minute)
+
+
+def _enforce_user_forensic_rules(
+    *,
+    day: dt.date,
+    arrival: str | None,
+    departure: str | None,
+    existing: Attendance | None,
+) -> None:
+    today = prague_today()
+    if day > today:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Budoucí průchod uživatel nesmí zadat.")
+
+    if day == today:
+        now_minutes = prague_minutes_since_midnight()
+        if (arrival is not None and (_minutes_from_hhmm(arrival) or 0) > now_minutes) or (
+            departure is not None and (_minutes_from_hhmm(departure) or 0) > now_minutes
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="U dnešního dne nelze zadat čas v budoucnosti podle času v Praze.",
+            )
+        return
+
+    if existing is None:
+        return
+
+    if existing.arrival_time is not None and arrival != existing.arrival_time:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Na minulých dnech lze doplnit jen chybějící příchod nebo odchod. Uložené hodnoty už měnit nejdou.",
+        )
+    if existing.departure_time is not None and departure != existing.departure_time:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Na minulých dnech lze doplnit jen chybějící příchod nebo odchod. Uložené hodnoty už měnit nejdou.",
+        )
 
 
 @router.get("/api/v1/attendance", response_model=AttendanceMonthOut)
@@ -160,6 +205,8 @@ def upsert_attendance(
             Attendance.date == day,
         )
     ).scalar_one_or_none()
+
+    _enforce_user_forensic_rules(day=day, arrival=arrival, departure=departure, existing=existing)
 
     if existing is None:
         existing = Attendance(

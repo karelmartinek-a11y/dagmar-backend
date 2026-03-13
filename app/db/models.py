@@ -251,6 +251,32 @@ class PortalUserResetToken(Base):
     user: Mapped[PortalUser] = relationship(back_populates="reset_tokens")
 
 
+class AttendanceReminderEvent(Base):
+    __tablename__ = "attendance_reminder_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False
+    )
+    attendance_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reminder_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    sent_to: Mapped[str] = mapped_column(String(160), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "instance_id",
+            "attendance_date",
+            "reminder_type",
+            "sequence_no",
+            name="uq_attendance_reminder_event_unique",
+        ),
+        Index("ix_attendance_reminder_events_instance_date", "instance_id", "attendance_date"),
+    )
+
+
 class AppSettings(Base):
     __tablename__ = "app_settings"
 

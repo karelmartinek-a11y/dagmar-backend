@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.v1 import public_instances
-from app.db.models import AppSettings, Base, ClientType, Instance, InstanceStatus
+from app.db.models import AppSettings, Base, Instance, InstanceStatus
 
 
 def _build_client() -> tuple[TestClient, sessionmaker[Session]]:
@@ -55,7 +55,7 @@ def test_public_instance_lifecycle_smoke() -> None:
         inst.status = InstanceStatus.ACTIVE
         inst.display_name = "Test"
         inst.employment_template = "DPP_DPC"
-        inst.activated_at = datetime.now(timezone.utc)
+        inst.activated_at = datetime.now(UTC)
         db.add(inst)
         db.add(AppSettings(id=1, afternoon_cutoff_minutes=17 * 60))
         db.commit()
