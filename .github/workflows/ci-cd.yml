@@ -86,6 +86,7 @@ jobs:
             /opt/dagmar/backend/.venv/bin/pip install --upgrade pip
             /opt/dagmar/backend/.venv/bin/pip install /opt/dagmar/backend
             cd /opt/dagmar/backend
+            printf '{"backend_commit":"%s"}\n' "$DEPLOY_TAG" > /opt/dagmar/backend/backend-version.json
             /opt/dagmar/backend/.venv/bin/alembic -c /opt/dagmar/backend/app/db/alembic.ini upgrade head
             sudo systemctl restart dagmar-backend
             cd /opt/dagmar/sandbox && ./run-tests.sh

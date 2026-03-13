@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Protocol, cast
 
@@ -37,8 +40,51 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _deployed_backend_tag(settings: Settings) -> str:
+    candidates = [
+        Path("/opt/dagmar/backend/backend-version.json"),
+        Path("/srv/hcasc/_repos/dagmar-backend/backend-version.json"),
+    ]
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+            tag = data.get("backend_commit")
+            if isinstance(tag, str) and tag.strip():
+                return tag.strip()
+        except Exception:
+            continue
+    return settings.deploy_tag
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        stop_event: Event | None = None
+        thread: Thread | None = None
+
+        if not settings.database_url.startswith("sqlite"):
+            stop_event = Event()
+
+            def loop() -> None:
+                session_factory = get_sessionmaker()
+                while stop_event is not None and not stop_event.is_set():
+                    run_attendance_reminders_once(settings, session_factory)
+                    stop_event.wait(60)
+
+            thread = Thread(target=loop, name="attendance-reminder-worker", daemon=True)
+            thread.start()
+            app.state.attendance_reminder_stop_event = stop_event
+            app.state.attendance_reminder_thread = thread
+
+        try:
+            yield
+        finally:
+            if stop_event is not None:
+                stop_event.set()
+            if thread is not None:
+                thread.join(timeout=2)
 
     app = FastAPI(
         title=APP_NAME_LONG,
@@ -46,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url=None if settings.disable_docs else "/api/docs",
         redoc_url=None,
         openapi_url=None if settings.disable_docs else "/api/openapi.json",
+        lifespan=lifespan,
     )
 
     # --- Middleware order matters: rate-limit early, sessions before endpoints.
@@ -103,33 +150,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _health_payload() -> dict[str, Any]:
         return {"ok": True}
 
-    @app.on_event("startup")
-    async def startup_attendance_reminders() -> None:
-        if settings.database_url.startswith("sqlite"):
-            return
-
-        stop_event = Event()
-
-        def loop() -> None:
-            session_factory = get_sessionmaker()
-            while not stop_event.is_set():
-                run_attendance_reminders_once(settings, session_factory)
-                stop_event.wait(60)
-
-        thread = Thread(target=loop, name="attendance-reminder-worker", daemon=True)
-        thread.start()
-        app.state.attendance_reminder_stop_event = stop_event
-        app.state.attendance_reminder_thread = thread
-
-    @app.on_event("shutdown")
-    async def shutdown_attendance_reminders() -> None:
-        stop_event = getattr(app.state, "attendance_reminder_stop_event", None)
-        thread = getattr(app.state, "attendance_reminder_thread", None)
-        if stop_event is not None:
-            stop_event.set()
-        if thread is not None:
-            thread.join(timeout=2)
-
     @app.get("/api/v1/health", include_in_schema=False)
     async def health_v1() -> dict[str, Any]:
         return await _health_payload()
@@ -141,7 +161,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/version", include_in_schema=False)
     async def version() -> dict[str, Any]:
         return {
-            "backend_deploy_tag": settings.deploy_tag,
+            "backend_deploy_tag": _deployed_backend_tag(settings),
             "environment": settings.environment,
         }
 
