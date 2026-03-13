@@ -1,7 +1,7 @@
 """Add attendance reminder events table.
 
-Revision ID: 2026_03_13_0008
-Revises: 2026_02_21_0007
+Revision ID: 0008
+Revises: 0007
 Create Date: 2026-03-13
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "2026_03_13_0008"
-down_revision = "2026_02_21_0007"
+revision = "0008"
+down_revision = "0007"
 branch_labels = None
 depends_on = None
 
