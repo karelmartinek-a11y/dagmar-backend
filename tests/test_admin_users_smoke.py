@@ -136,6 +136,49 @@ def test_admin_create_and_delete_user_cascades_attendance() -> None:
         assert remaining == []
 
 
+def test_admin_delete_user_with_shared_instance_removes_only_selected_user() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        inst = Instance(
+            id="inst-shared",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-shared",
+            status=InstanceStatus.ACTIVE,
+            display_name="Sdilena",
+            created_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        first_user = PortalUser(
+            email="first@example.com",
+            name="First",
+            role=PortalUserRole.EMPLOYEE,
+            instance_id=inst.id,
+        )
+        second_user = PortalUser(
+            email="second@example.com",
+            name="Second",
+            role=PortalUserRole.EMPLOYEE,
+            instance_id=inst.id,
+        )
+        db.add(inst)
+        db.add(first_user)
+        db.add(second_user)
+        db.add(Attendance(instance_id=inst.id, date=datetime(2026, 3, 8, tzinfo=UTC).date(), arrival_time="08:00"))
+        db.commit()
+        first_user_id = first_user.id
+
+    delete_response = client.delete(f"/api/v1/admin/users/{first_user_id}")
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"ok": True}
+
+    with session_local() as db:
+        assert db.get(PortalUser, first_user_id) is None
+        assert db.get(Instance, "inst-shared") is not None
+        remaining = db.execute(select(Attendance).where(Attendance.instance_id == "inst-shared")).scalars().all()
+        assert len(remaining) == 1
+
+
 def test_attendance_invalid_date_returns_400() -> None:
     client, session_local = _build_client()
 

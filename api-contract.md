@@ -401,6 +401,10 @@ Tyto reminder e-maily se posílají na e-mail uložený u uživatele.
 - Pokud má uživatel plánovaný příchod a 5 minut po plánovaném čase nemá zaznamenaný příchod, odešle se e-mail `Nemáš zapsaný příchod`.
 - Odeslání se opakuje maximálně 5x, vždy po 10 minutách, dokud není příchod zapsán.
 
-### Chybějící odchod ve 20:00
-- Pokud má uživatel v daný den ve 20:00 zaznamenán pouze příchod bez odchodu, odešle se e-mail `JSI JEŠTĚ V PRÁCI? NEMÁŠ ZAPSÁN ODCHOD`.
-- Odeslání se opakuje maximálně 5x, vždy po 15 minutách, dokud není odchod zapsán.
+### Chybějící odchod po plánovaném konci směny
+- Pokud má uživatel naplánované ukončení směny a ještě 2 hodiny po něm nemá zaznamenán odchod, odešle se e-mail `Jsi ještě v práci? Nemáš zapsán odchod`.
+- Odeslání se opakuje maximálně 5x, vždy po 10 minutách, dokud není odchod zapsán.
+
+### Chybějící odchod z předchozího dne v 8:00
+- Pokud má uživatel včera zaznamenán pouze příchod bez odchodu, odešle se v 8:00 e-mail s dotazem, zda jen nezapomněl dopsat včerejší odchod.
+- Odeslání se opakuje maximálně 5x, vždy po 10 minutách, dokud není včerejší odchod zapsán.

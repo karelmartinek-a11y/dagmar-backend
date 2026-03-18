@@ -29,16 +29,21 @@ def _settings() -> Settings:
     )
 
 
-def test_missing_arrival_reminder_is_sent_once_per_sequence() -> None:
+def _session_local() -> sessionmaker:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    session_local = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(bind=engine)
+    return session_local
 
-    with SessionLocal() as db:
+
+def test_missing_arrival_reminder_is_sent_once_per_sequence() -> None:
+    session_local = _session_local()
+
+    with session_local() as db:
         db.add(
             Instance(
                 id="inst-1",
@@ -85,16 +90,10 @@ def test_missing_arrival_reminder_is_sent_once_per_sequence() -> None:
         assert db.query(AttendanceReminderEvent).count() == 3
 
 
-def test_missing_departure_reminder_requires_arrival() -> None:
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    Base.metadata.create_all(bind=engine)
+def test_missing_departure_reminder_starts_two_hours_after_planned_departure() -> None:
+    session_local = _session_local()
 
-    with SessionLocal() as db:
+    with session_local() as db:
         db.add(
             Instance(
                 id="inst-2",
@@ -113,15 +112,79 @@ def test_missing_departure_reminder_requires_arrival() -> None:
                 is_active=True,
             )
         )
+        db.add(ShiftPlan(instance_id="inst-2", date=datetime(2026, 3, 13).date(), arrival_time="08:00", departure_time="16:00"))
         db.add(Attendance(instance_id="inst-2", date=datetime(2026, 3, 13).date(), arrival_time="08:00", departure_time=None))
         db.commit()
 
         sent: list[tuple[str, str]] = []
+
+        early_count = process_attendance_reminders(
+            db,
+            _settings(),
+            now=datetime(2026, 3, 13, 17, 59),
+            send_email=lambda to_email, subject, body: sent.append((to_email, subject)),
+        )
+        assert early_count == 0
+
         count = process_attendance_reminders(
             db,
             _settings(),
-            now=datetime(2026, 3, 13, 20, 31),
+            now=datetime(2026, 3, 13, 18, 21),
             send_email=lambda to_email, subject, body: sent.append((to_email, subject)),
         )
         assert count == 3
-        assert sent[-1] == ("marie@example.com", "JSI JEŠTĚ V PRÁCI? NEMÁŠ ZAPSÁN ODCHOD")
+        assert sent == [
+            ("marie@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+            ("marie@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+            ("marie@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+        ]
+
+
+def test_previous_day_missing_departure_reminder_runs_from_8am() -> None:
+    session_local = _session_local()
+
+    with session_local() as db:
+        db.add(
+            Instance(
+                id="inst-3",
+                client_type=ClientType.WEB,
+                device_fingerprint="fp-3",
+                status=InstanceStatus.ACTIVE,
+                display_name="Eva",
+            )
+        )
+        db.add(
+            PortalUser(
+                email="eva@example.com",
+                name="Eva",
+                role=PortalUserRole.EMPLOYEE,
+                instance_id="inst-3",
+                is_active=True,
+            )
+        )
+        db.add(Attendance(instance_id="inst-3", date=datetime(2026, 3, 12).date(), arrival_time="08:00", departure_time=None))
+        db.commit()
+
+        sent: list[tuple[str, str]] = []
+
+        early_count = process_attendance_reminders(
+            db,
+            _settings(),
+            now=datetime(2026, 3, 13, 7, 59),
+            send_email=lambda to_email, subject, body: sent.append((to_email, subject)),
+        )
+        assert early_count == 0
+
+        count = process_attendance_reminders(
+            db,
+            _settings(),
+            now=datetime(2026, 3, 13, 8, 31),
+            send_email=lambda to_email, subject, body: sent.append((to_email, subject)),
+        )
+        assert count == 4
+        assert sent == [
+            ("eva@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+            ("eva@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+            ("eva@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+            ("eva@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+        ]

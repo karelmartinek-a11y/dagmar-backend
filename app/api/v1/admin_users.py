@@ -105,12 +105,10 @@ def _send_reset_email(*, settings: Settings, cfg: AppSettings, to_email: str, re
     msg["From"] = f"{cfg.smtp_from_name} <{from_email}>" if cfg.smtp_from_name else from_email
     msg["To"] = to_email
     msg.set_content(
-        
-            "Dobrý den,\n\n"
-            "pro nastavení nebo změnu hesla použijte tento odkaz (platnost 24 hodin):\n\n"
-            f"{reset_url}\n\n"
-            "Pokud jste o změnu nežádali, ignorujte tento e-mail."
-        
+        "Dobrý den,\n\n"
+        "pro nastavení nebo změnu hesla použijte tento odkaz (platnost 24 hodin):\n\n"
+        f"{reset_url}\n\n"
+        "Pokud jste o změnu nežádali, ignorujte tento e-mail."
     )
 
     server: smtplib.SMTP
@@ -178,7 +176,7 @@ def create_user(
 
     exists = db.execute(select(PortalUser).where(PortalUser.email == email)).scalars().first()
     if exists:
-        raise HTTPException(status_code=409, detail="Uživatel s tímto e‑mailem už existuje.")
+        raise HTTPException(status_code=409, detail="Uživatel s tímto e-mailem už existuje.")
 
     inst_id = None
     if role_enum == PortalUserRole.EMPLOYEE:
@@ -239,7 +237,7 @@ def update_user(
                 select(PortalUser).where(PortalUser.email == email).where(PortalUser.id != user.id)
             ).scalars().first()
             if exists:
-                raise HTTPException(status_code=409, detail="Uživatel s tímto e‑mailem už existuje.")
+                raise HTTPException(status_code=409, detail="Uživatel s tímto e-mailem už existuje.")
         user.email = email
 
     if payload.role is not None:
@@ -287,26 +285,22 @@ def delete_user(
         raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
 
     instance_id = user.instance_id
+    db.delete(user)
+
     if instance_id:
         other_links = db.execute(
             select(PortalUser).where(PortalUser.instance_id == instance_id).where(PortalUser.id != user.id)
         ).scalars().first()
-        if other_links is not None:
-            raise HTTPException(
-                status_code=409,
-                detail="Instanci používá více uživatelů; smazání by nebylo bezpečné.",
-            )
+        if other_links is None:
+            db.execute(delete(Attendance).where(Attendance.instance_id == instance_id))
+            db.execute(delete(AttendanceLock).where(AttendanceLock.instance_id == instance_id))
+            db.execute(delete(ShiftPlan).where(ShiftPlan.instance_id == instance_id))
+            db.execute(delete(ShiftPlanMonthInstance).where(ShiftPlanMonthInstance.instance_id == instance_id))
+            db.execute(delete(AttendanceReminderEvent).where(AttendanceReminderEvent.instance_id == instance_id))
+            inst = db.get(Instance, instance_id)
+            if inst is not None:
+                db.delete(inst)
 
-    db.delete(user)
-    if instance_id:
-        db.execute(delete(Attendance).where(Attendance.instance_id == instance_id))
-        db.execute(delete(AttendanceLock).where(AttendanceLock.instance_id == instance_id))
-        db.execute(delete(ShiftPlan).where(ShiftPlan.instance_id == instance_id))
-        db.execute(delete(ShiftPlanMonthInstance).where(ShiftPlanMonthInstance.instance_id == instance_id))
-        db.execute(delete(AttendanceReminderEvent).where(AttendanceReminderEvent.instance_id == instance_id))
-        inst = db.get(Instance, instance_id)
-        if inst is not None:
-            db.delete(inst)
     db.commit()
     return OkOut(ok=True)
 

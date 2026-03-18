@@ -24,9 +24,10 @@ from app.services.prague_time import combine_prague, combine_prague_hhmm, prague
 logger = logging.getLogger(__name__)
 
 ARRIVAL_REMINDER = "missing_arrival"
-DEPARTURE_REMINDER = "missing_departure"
+SAME_DAY_DEPARTURE_REMINDER = "missing_departure_after_shift"
+PREVIOUS_DAY_DEPARTURE_REMINDER = "missing_departure_previous_day"
 ARRIVAL_SUBJECT = "Nemáš zapsaný příchod"
-DEPARTURE_SUBJECT = "JSI JEŠTĚ V PRÁCI? NEMÁŠ ZAPSÁN ODCHOD"
+DEPARTURE_SUBJECT = "Jsi ještě v práci? Nemáš zapsán odchod"
 
 ReminderSender = Callable[[str, str, str], None]
 SCHEDULER_ADVISORY_LOCK = 248613
@@ -136,6 +137,7 @@ def process_attendance_reminders(
 ) -> int:
     current = prague_now(now)
     today = current.date()
+    yesterday = today - timedelta(days=1)
     cfg = _get_settings_row(db)
     sender = send_email or _smtp_sender(settings, cfg)
 
@@ -151,22 +153,23 @@ def process_attendance_reminders(
 
     instance_ids = [user.instance_id for user in users if user.instance_id]
     plans = db.execute(
-        select(ShiftPlan).where(ShiftPlan.date == today, ShiftPlan.instance_id.in_(instance_ids))
+        select(ShiftPlan).where(ShiftPlan.date.in_([today, yesterday]), ShiftPlan.instance_id.in_(instance_ids))
     ).scalars().all()
     attendances = db.execute(
-        select(Attendance).where(Attendance.date == today, Attendance.instance_id.in_(instance_ids))
+        select(Attendance).where(Attendance.date.in_([today, yesterday]), Attendance.instance_id.in_(instance_ids))
     ).scalars().all()
 
-    plan_by_instance = {plan.instance_id: plan for plan in plans}
-    attendance_by_instance = {row.instance_id: row for row in attendances}
-    already_sent = _already_sent_keys(db, today)
+    plan_by_key = {(plan.instance_id, plan.date): plan for plan in plans}
+    attendance_by_key = {(row.instance_id, row.date): row for row in attendances}
+    already_sent = _already_sent_keys(db, today) | _already_sent_keys(db, yesterday)
     sent_count = 0
 
     for user in users:
         if not user.instance_id:
             continue
-        plan = plan_by_instance.get(user.instance_id)
-        attendance = attendance_by_instance.get(user.instance_id)
+        plan = plan_by_key.get((user.instance_id, today))
+        attendance = attendance_by_key.get((user.instance_id, today))
+        previous_day_attendance = attendance_by_key.get((user.instance_id, yesterday))
 
         if plan and plan.arrival_time and (attendance is None or attendance.arrival_time is None):
             first_at = combine_prague_hhmm(today, plan.arrival_time) + timedelta(minutes=5)
@@ -184,19 +187,37 @@ def process_attendance_reminders(
                 already_sent.add(key)
                 sent_count += 1
 
-        if attendance and attendance.arrival_time and not attendance.departure_time:
-            first_at = combine_prague(today, 20, 0)
-            due_attempts = _scheduled_attempt_count(current, first_at, interval_minutes=15, max_attempts=5)
+        if plan and plan.departure_time and attendance and attendance.arrival_time and not attendance.departure_time:
+            first_at = combine_prague_hhmm(today, plan.departure_time) + timedelta(hours=2)
+            due_attempts = _scheduled_attempt_count(current, first_at, interval_minutes=10, max_attempts=5)
             for sequence_no in range(1, due_attempts + 1):
-                key = (user.instance_id, today, DEPARTURE_REMINDER, sequence_no)
+                key = (user.instance_id, today, SAME_DAY_DEPARTURE_REMINDER, sequence_no)
                 if key in already_sent:
                     continue
                 sender(
                     user.email,
                     DEPARTURE_SUBJECT,
-                    "JSI JEŠTĚ V PRÁCI? NEMÁŠ ZAPSÁN ODCHOD.\n\nProsím zkontroluj dnešní docházku.",
+                    "Máš naplánované ukončení směny, ale stále nemáš zapsán odchod.\n\n"
+                    "Jsi ještě v práci, nebo jsi jen zapomněl zapsat odchod? Prosím zkontroluj dnešní docházku.",
                 )
-                _record_sent(db, user.instance_id, today, DEPARTURE_REMINDER, sequence_no, user.email)
+                _record_sent(db, user.instance_id, today, SAME_DAY_DEPARTURE_REMINDER, sequence_no, user.email)
+                already_sent.add(key)
+                sent_count += 1
+
+        if previous_day_attendance and previous_day_attendance.arrival_time and not previous_day_attendance.departure_time:
+            first_at = combine_prague(today, 8, 0)
+            due_attempts = _scheduled_attempt_count(current, first_at, interval_minutes=10, max_attempts=5)
+            for sequence_no in range(1, due_attempts + 1):
+                key = (user.instance_id, yesterday, PREVIOUS_DAY_DEPARTURE_REMINDER, sequence_no)
+                if key in already_sent:
+                    continue
+                sender(
+                    user.email,
+                    DEPARTURE_SUBJECT,
+                    "Včera máš zapsán příchod bez odchodu.\n\n"
+                    "Nezapomněl(a) jsi dopsat včerejší odchod z práce? Prosím zkontroluj docházku za předchozí den.",
+                )
+                _record_sent(db, user.instance_id, yesterday, PREVIOUS_DAY_DEPARTURE_REMINDER, sequence_no, user.email)
                 already_sent.add(key)
                 sent_count += 1
 
