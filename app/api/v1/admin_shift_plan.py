@@ -30,6 +30,7 @@ class ShiftPlanDayOut(BaseModel):
     date: str
     arrival_time: str | None = None
     departure_time: str | None = None
+    status: str | None = None
 
 
 class ShiftPlanRowOut(BaseModel):
@@ -58,6 +59,9 @@ class ShiftPlanUpsertIn(BaseModel):
     date: str = Field(..., description="YYYY-MM-DD")
     arrival_time: str | None = Field(None, description="HH:MM or null")
     departure_time: str | None = Field(None, description="HH:MM or null")
+    status: str | None = Field(
+        None, description="HOLIDAY | OFF | null", pattern="^(HOLIDAY|OFF)?$", examples=["HOLIDAY", "OFF"]
+    )
 
 
 class OkOut(BaseModel):
@@ -181,6 +185,7 @@ def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int, acti
                     date=cur.isoformat(),
                     arrival_time=p.arrival_time if p else None,
                     departure_time=p.departure_time if p else None,
+                    status=p.status if p else None,
                 )
             )
             cur = cur + dt.timedelta(days=1)
@@ -226,6 +231,12 @@ def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut
         departure = parse_hhmm_or_none(body.departure_time)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if body.status not in (None, "HOLIDAY", "OFF"):
+        raise HTTPException(status_code=400, detail="Invalid status, expected HOLIDAY or OFF or null")
+    if body.status is not None:
+        # Blokovaný den nemá mít konkrétní časy.
+        arrival = None
+        departure = None
 
     existing = db.execute(
         select(ShiftPlan).where(
@@ -235,18 +246,21 @@ def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut
     ).scalar_one_or_none()
 
     # Remove empty row to keep "existence" semantics simple.
-    if arrival is None and departure is None:
+    if arrival is None and departure is None and body.status is None:
         if existing is not None:
             db.delete(existing)
             db.commit()
         return OkOut(ok=True)
 
     if existing is None:
-        existing = ShiftPlan(instance_id=profile.id, date=day, arrival_time=arrival, departure_time=departure)
+        existing = ShiftPlan(
+            instance_id=profile.id, date=day, arrival_time=arrival, departure_time=departure, status=body.status
+        )
         db.add(existing)
     else:
         existing.arrival_time = arrival
         existing.departure_time = departure
+        existing.status = body.status
 
     db.commit()
     return OkOut(ok=True)

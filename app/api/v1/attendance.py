@@ -25,6 +25,7 @@ class AttendanceDayOut(BaseModel):
     departure_time: str | None = None
     planned_arrival_time: str | None = None
     planned_departure_time: str | None = None
+    planned_status: str | None = None
 
 
 class AttendanceMonthOut(BaseModel):
@@ -158,6 +159,7 @@ def get_month_attendance(
                 departure_time=r.departure_time if r else None,
                 planned_arrival_time=p.arrival_time if p else None,
                 planned_departure_time=p.departure_time if p else None,
+                planned_status=p.status if p else None,
             )
         )
         cur = cur + dt.timedelta(days=1)
