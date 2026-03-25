@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -69,7 +70,7 @@ def _get_settings(db: Session) -> AppSettings:
     return st
 
 
-def _record_login_failure(db: Session, lock_state, *, detail: str) -> None:
+def _record_login_failure(db: Session, lock_state, *, detail: str) -> NoReturn:
     became_locked = record_failed_login(lock_state, lock_duration=PORTAL_LOCKOUT_DURATION)
     db.add(lock_state)
     db.commit()
@@ -86,10 +87,11 @@ def portal_login(payload: PortalLoginIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=423, detail="Ucet je docasne zablokovany")
 
     user = db.execute(select(PortalUser).where(PortalUser.email == email)).scalars().first()
-    if not user or not user.is_active or not user.password_hash:
+    if user is None or not user.is_active or user.password_hash is None:
         _record_login_failure(db, lock_state, detail="Neplatne prihlasovaci udaje")
     if user.role != PortalUserRole.EMPLOYEE:
         _record_login_failure(db, lock_state, detail="Nepodporovany typ uctu")
+    assert user.password_hash is not None
     if not verify_password(payload.password, user.password_hash):
         _record_login_failure(db, lock_state, detail="Neplatne prihlasovaci udaje")
 

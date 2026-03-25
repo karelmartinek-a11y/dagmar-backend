@@ -48,10 +48,23 @@ def get_lockout_state(db: Session, *, actor_type: str, principal: str, create: b
     if state is not None and len(states) > 1:
         duplicates = states[1:]
         state.failed_attempts = max(int(item.failed_attempts or 0) for item in states)
-        first_failed_values = [as_utc(item.first_failed_at) for item in states if item.first_failed_at]
-        last_failed_values = [as_utc(item.last_failed_at) for item in states if item.last_failed_at]
-        locked_until_values = [as_utc(item.locked_until) for item in states if item.locked_until]
-        forgot_values = [as_utc(item.last_forgot_sent_at) for item in states if item.last_forgot_sent_at]
+        first_failed_values: list[datetime] = []
+        last_failed_values: list[datetime] = []
+        locked_until_values: list[datetime] = []
+        forgot_values: list[datetime] = []
+        for item in states:
+            first_failed_at = as_utc(item.first_failed_at)
+            if first_failed_at is not None:
+                first_failed_values.append(first_failed_at)
+            last_failed_at = as_utc(item.last_failed_at)
+            if last_failed_at is not None:
+                last_failed_values.append(last_failed_at)
+            locked_until = as_utc(item.locked_until)
+            if locked_until is not None:
+                locked_until_values.append(locked_until)
+            last_forgot_sent_at = as_utc(item.last_forgot_sent_at)
+            if last_forgot_sent_at is not None:
+                forgot_values.append(last_forgot_sent_at)
         state.first_failed_at = min(first_failed_values) if first_failed_values else None
         state.last_failed_at = max(last_failed_values) if last_failed_values else None
         state.locked_until = max(locked_until_values) if locked_until_values else None
