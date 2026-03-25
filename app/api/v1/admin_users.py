@@ -33,6 +33,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.security.crypto import decrypt_secret
 from app.security.csrf import require_csrf
+from app.security.passwords import hash_password
 
 router = APIRouter(prefix="/api/v1/admin/users", tags=["admin-users"])
 
@@ -60,6 +61,7 @@ class PortalUserCreateIn(BaseModel):
     email: str = Field(min_length=3, max_length=160)
     role: str = Field(min_length=1, max_length=32)
     employment_template: str | None = Field(default=None, min_length=3, max_length=16)
+    password: str | None = Field(default=None, min_length=8, max_length=256)
 
 
 class PortalUserUpdateIn(BaseModel):
@@ -70,6 +72,11 @@ class PortalUserUpdateIn(BaseModel):
     employment_template: str | None = Field(default=None, min_length=3, max_length=16)
     profile_instance_id: str | None = Field(default=None, max_length=36)
     is_active: bool | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=256)
+
+
+class PortalUserPasswordIn(BaseModel):
+    password: str = Field(min_length=8, max_length=256)
 
 
 class OkOut(BaseModel):
@@ -147,6 +154,30 @@ def _to_user_out(user: PortalUser) -> PortalUserOut:
     )
 
 
+def _invalidate_instance_token(user: PortalUser, db: Session) -> None:
+    inst = user.instance or (db.get(Instance, user.instance_id) if user.instance_id else None)
+    if inst is None:
+        return
+    inst.token_hash = None
+    inst.token_issued_at = None
+    db.add(inst)
+
+
+def _apply_password(db: Session, user: PortalUser, raw_password: str | None) -> None:
+    if raw_password is None:
+        return
+    password = raw_password.strip()
+    if not password:
+        raise HTTPException(status_code=400, detail="Heslo nesmi byt prazdne.")
+    try:
+        new_hash = hash_password(password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    user.password_hash = new_hash.value
+    db.execute(delete(PortalUserResetToken).where(PortalUserResetToken.user_id == user.id))
+    _invalidate_instance_token(user, db)
+
+
 @router.get("", response_model=PortalUserListOut)
 def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
     rows = db.execute(select(PortalUser).order_by(PortalUser.name.asc())).scalars().all()
@@ -203,6 +234,11 @@ def create_user(
         instance_id=inst_id,
     )
     db.add(user)
+    db.flush()
+
+    if payload.password is not None:
+        _apply_password(db, user, payload.password)
+
     db.commit()
     db.refresh(user)
 
@@ -219,7 +255,7 @@ def update_user(
 ):
     user = db.get(PortalUser, int(user_id))
     if user is None:
-        raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
+        raise HTTPException(status_code=404, detail="Uzivatel nenalezen.")
 
     if payload.name is not None:
         user.name = payload.name.strip()
@@ -266,10 +302,31 @@ def update_user(
     if payload.is_active is not None:
         user.is_active = payload.is_active
 
+    if payload.password is not None:
+        _apply_password(db, user, payload.password)
+
     db.add(user)
     db.commit()
     db.refresh(user)
 
+    return _to_user_out(user)
+
+
+@router.post("/{user_id}/set-password", response_model=PortalUserOut)
+def set_user_password(
+    user_id: int,
+    payload: PortalUserPasswordIn,
+    _admin=Depends(require_admin),
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    user = db.get(PortalUser, int(user_id))
+    if user is None:
+        raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
+    _apply_password(db, user, payload.password)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
     return _to_user_out(user)
 
 

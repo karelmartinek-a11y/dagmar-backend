@@ -99,6 +99,50 @@ def test_admin_update_user_smoke() -> None:
     assert payload["is_active"] is False
 
 
+def test_admin_set_password_smoke() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        inst = Instance(
+            id="inst-pass",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-pass",
+            status=InstanceStatus.ACTIVE,
+            display_name="Heslo",
+            created_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+            token_hash="legacy-token",
+            token_issued_at=datetime.now(UTC),
+        )
+        user = PortalUser(
+            email="pass@example.com",
+            name="Pass",
+            role=PortalUserRole.EMPLOYEE,
+            instance_id=inst.id,
+        )
+        db.add(inst)
+        db.add(user)
+        db.commit()
+        user_id = user.id
+
+    response = client.post(
+        f"/api/v1/admin/users/{user_id}/set-password",
+        json={"password": "StrongPass123"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["has_password"] is True
+
+    with session_local() as db:
+        db_user = db.get(PortalUser, user_id)
+        assert db_user is not None
+        assert db_user.password_hash
+        db_inst = db.get(Instance, "inst-pass")
+        assert db_inst is not None
+        assert db_inst.token_hash is None
+
+
 def test_admin_create_and_delete_user_cascades_attendance() -> None:
     client, session_local = _build_client()
 
