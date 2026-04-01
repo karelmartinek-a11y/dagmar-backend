@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -413,3 +413,42 @@ def test_attendance_ignores_month_lock_for_employee() -> None:
         json={"date": "2026-03-08", "arrival_time": "08:00", "departure_time": "16:00"},
     )
     assert put_response.status_code == 200
+
+
+def test_admin_list_users_includes_lock_state() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        inst = Instance(
+            id="inst-locked-user",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-locked-user",
+            status=InstanceStatus.ACTIVE,
+            display_name="Locked User",
+            created_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        user = PortalUser(
+            email="locked.user@example.com",
+            name="Locked User",
+            role=PortalUserRole.EMPLOYEE,
+            instance_id=inst.id,
+        )
+        lock_state = AuthLockoutState(
+            actor_type="portal",
+            principal="locked.user@example.com",
+            failed_attempts=3,
+            locked_until=(datetime.now(UTC) + timedelta(minutes=30)).replace(microsecond=0),
+        )
+        db.add(inst)
+        db.add(user)
+        db.add(lock_state)
+        db.commit()
+
+    response = client.get("/api/v1/admin/users")
+
+    assert response.status_code == 200
+    payload = response.json()
+    locked_user = next(item for item in payload["users"] if item["email"] == "locked.user@example.com")
+    assert locked_user["is_locked"] is True
+    assert locked_user["locked_until"] is not None

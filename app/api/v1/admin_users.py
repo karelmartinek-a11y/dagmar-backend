@@ -20,6 +20,7 @@ from app.db.models import (
     Attendance,
     AttendanceLock,
     AttendanceReminderEvent,
+    AuthLockoutState,
     ClientType,
     EmploymentTemplate,
     Instance,
@@ -33,7 +34,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.security.crypto import decrypt_secret
 from app.security.csrf import require_csrf
-from app.security.lockout import clear_user_lockout, revoke_unlock_tokens
+from app.security.lockout import as_utc, clear_user_lockout, is_locked, revoke_unlock_tokens
 from app.security.passwords import hash_password
 
 router = APIRouter(prefix="/api/v1/admin/users", tags=["admin-users"])
@@ -51,6 +52,8 @@ class PortalUserOut(BaseModel):
     has_password: bool
     profile_instance_id: str | None = None
     is_active: bool
+    is_locked: bool = False
+    locked_until: str | None = None
 
 
 class PortalUserListOut(BaseModel):
@@ -141,7 +144,8 @@ def _resolve_profile_instance_id(user: PortalUser) -> str | None:
     return user.instance.profile_instance_id or user.instance_id
 
 
-def _to_user_out(user: PortalUser) -> PortalUserOut:
+def _to_user_out(user: PortalUser, lock_state: AuthLockoutState | None = None) -> PortalUserOut:
+    locked_until = as_utc(lock_state.locked_until) if lock_state is not None else None
     return PortalUserOut(
         id=user.id,
         name=user.name,
@@ -152,6 +156,8 @@ def _to_user_out(user: PortalUser) -> PortalUserOut:
         has_password=bool(user.password_hash),
         profile_instance_id=_resolve_profile_instance_id(user),
         is_active=user.is_active,
+        is_locked=is_locked(lock_state),
+        locked_until=locked_until.isoformat() if locked_until is not None else None,
     )
 
 
@@ -184,7 +190,19 @@ def _apply_password(db: Session, user: PortalUser, raw_password: str | None) -> 
 @router.get("", response_model=PortalUserListOut)
 def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
     rows = db.execute(select(PortalUser).order_by(PortalUser.name.asc())).scalars().all()
-    out = [_to_user_out(u) for u in rows]
+    principals = [user.email.lower() for user in rows if user.email]
+    lock_rows = (
+        db.execute(
+            select(AuthLockoutState).where(
+                AuthLockoutState.actor_type == "portal",
+                AuthLockoutState.principal.in_(principals),
+            )
+        ).scalars().all()
+        if principals
+        else []
+    )
+    locks_by_principal = {row.principal: row for row in lock_rows}
+    out = [_to_user_out(u, locks_by_principal.get(u.email.lower())) for u in rows]
     return PortalUserListOut(users=out)
 
 
