@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_instance, resolve_profile_instance
-from app.db.models import Attendance, AttendanceLock, Instance, ShiftPlan
+from app.db.models import Attendance, Instance, ShiftPlan
 from app.db.session import get_db
 from app.services.prague_time import prague_minutes_since_midnight, prague_today
 from app.utils.timeparse import parse_hhmm_or_none
@@ -35,23 +35,12 @@ class AttendanceMonthOut(BaseModel):
 
 class AttendanceUpsertIn(BaseModel):
     date: str = Field(..., description="YYYY-MM-DD")
-    arrival_time: str | None = Field(None, description='HH:MM or null')
-    departure_time: str | None = Field(None, description='HH:MM or null')
+    arrival_time: str | None = Field(None, description="HH:MM or null")
+    departure_time: str | None = Field(None, description="HH:MM or null")
 
 
 class OkOut(BaseModel):
     ok: bool = True
-
-
-def _is_locked(db: Session, instance_id: str, year: int, month: int) -> bool:
-    lock = db.execute(
-        select(AttendanceLock).where(
-            AttendanceLock.instance_id == instance_id,
-            AttendanceLock.year == year,
-            AttendanceLock.month == month,
-        )
-    ).scalar_one_or_none()
-    return lock is not None
 
 
 def _month_range(year: int, month: int) -> tuple[dt.date, dt.date]:
@@ -119,12 +108,6 @@ def get_month_attendance(
     start, end = _month_range(year, month)
     profile = resolve_profile_instance(db, inst)
 
-    if _is_locked(db, profile.id, year, month):
-        raise HTTPException(
-            status_code=status.HTTP_423_LOCKED,
-            detail={"code": "ATTENDANCE_MONTH_LOCKED", "message": "Docházka pro tento měsíc je uzavřená administrátorem."},
-        )
-
     rows = db.execute(
         select(Attendance)
         .where(Attendance.instance_id == profile.id)
@@ -144,28 +127,27 @@ def get_month_attendance(
             .where(ShiftPlan.date < end)
         ).scalars().all()
         plan_by_date = {r.date: r for r in plan_rows}
-    except SQLAlchemyError as e:
-        logging.getLogger(__name__).warning("ShiftPlan unavailable for attendance: %s", e)
+    except SQLAlchemyError as exc:
+        logging.getLogger(__name__).warning("ShiftPlan unavailable for attendance: %s", exc)
 
     days: list[AttendanceDayOut] = []
     cur = start
     while cur < end:
-        r = by_date.get(cur)
-        p = plan_by_date.get(cur)
+        row = by_date.get(cur)
+        plan = plan_by_date.get(cur)
         days.append(
             AttendanceDayOut(
                 date=cur.isoformat(),
-                arrival_time=r.arrival_time if r else None,
-                departure_time=r.departure_time if r else None,
-                planned_arrival_time=p.arrival_time if p else None,
-                planned_departure_time=p.departure_time if p else None,
-                planned_status=p.status if p else None,
+                arrival_time=row.arrival_time if row else None,
+                departure_time=row.departure_time if row else None,
+                planned_arrival_time=plan.arrival_time if plan else None,
+                planned_departure_time=plan.departure_time if plan else None,
+                planned_status=plan.status if plan else None,
             )
         )
         cur = cur + dt.timedelta(days=1)
 
     display_name = profile.display_name or f"Zařízení {profile.id[:8]}"
-
     return AttendanceMonthOut(days=days, instance_display_name=display_name)
 
 
@@ -175,32 +157,22 @@ def upsert_attendance(
     db: Session = Depends(get_db),
     inst: Instance = Depends(require_instance),
 ) -> OkOut:
-    # Prevent writes to locked months
     try:
         day = dt.date.fromisoformat(body.date)
-    except ValueError as e:
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid date format, expected YYYY-MM-DD",
-        ) from e
+        ) from exc
+
     profile = resolve_profile_instance(db, inst)
-    if _is_locked(db, profile.id, day.year, day.month):
-        raise HTTPException(
-            status_code=status.HTTP_423_LOCKED,
-            detail={"code": "ATTENDANCE_MONTH_LOCKED", "message": "Docházka pro tento měsíc je uzavřená administrátorem."},
-        )
 
-    # Validate date
-    # day already parsed above
-
-    # Validate times (only format/range, no other business rules)
     try:
         arrival = parse_hhmm_or_none(body.arrival_time)
         departure = parse_hhmm_or_none(body.departure_time)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    # Upsert
     existing = db.execute(
         select(Attendance).where(
             Attendance.instance_id == profile.id,

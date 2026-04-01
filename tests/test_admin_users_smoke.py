@@ -12,6 +12,7 @@ from app.api.deps import require_admin, require_instance
 from app.api.v1 import admin_users, attendance, portal_auth
 from app.db.models import (
     Attendance,
+    AttendanceLock,
     Base,
     ClientType,
     AuthLockoutState,
@@ -377,3 +378,38 @@ def test_attendance_future_or_locked_past_rules() -> None:
         json={"date": "2026-03-08", "arrival_time": "08:00", "departure_time": "16:00"},
     )
     assert fill_missing_response.status_code == 200
+
+
+def test_attendance_ignores_month_lock_for_employee() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        inst = Instance(
+            id="inst-2",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-2",
+            status=InstanceStatus.ACTIVE,
+            display_name="Marie",
+            created_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        db.add(inst)
+        db.add(
+            AttendanceLock(
+                instance_id="inst-2",
+                year=2026,
+                month=3,
+                locked_by="admin",
+            )
+        )
+        db.commit()
+
+    month_response = client.get("/api/v1/attendance", params={"year": 2026, "month": 3})
+    assert month_response.status_code == 200
+    assert len(month_response.json()["days"]) == 31
+
+    put_response = client.put(
+        "/api/v1/attendance",
+        json={"date": "2026-03-08", "arrival_time": "08:00", "departure_time": "16:00"},
+    )
+    assert put_response.status_code == 200
