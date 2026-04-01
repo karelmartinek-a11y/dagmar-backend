@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
@@ -13,16 +14,16 @@ from app.api.v1 import admin_users, attendance, portal_auth
 from app.db.models import (
     Attendance,
     AttendanceLock,
+    AuthLockoutState,
     Base,
     ClientType,
-    AuthLockoutState,
     Instance,
     InstanceStatus,
     PortalUser,
     PortalUserRole,
 )
-from app.security.passwords import hash_password
 from app.security.csrf import require_csrf
+from app.security.passwords import hash_password
 
 
 def _build_client() -> tuple[TestClient, sessionmaker[Session]]:
@@ -116,6 +117,45 @@ def test_portal_login_ignores_existing_lockout_and_uses_password_smoke() -> None
     )
     assert login_response.status_code == 200
     assert login_response.json()["instance_id"] == "inst-lock"
+
+
+def test_portal_login_accepts_legacy_sha256_hash_and_rehashes_smoke() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        inst = Instance(
+            id="inst-legacy",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-legacy",
+            status=InstanceStatus.ACTIVE,
+            display_name="Legacy",
+            created_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        user = PortalUser(
+            email="legacy@example.com",
+            name="Legacy User",
+            role=PortalUserRole.EMPLOYEE,
+            password_hash=hashlib.sha256(b"StrongPass123").hexdigest(),
+            instance_id=inst.id,
+        )
+        db.add(inst)
+        db.add(user)
+        db.commit()
+
+    login_response = client.post(
+        "/api/v1/portal/login",
+        json={"email": "legacy@example.com", "password": "StrongPass123"},
+    )
+
+    assert login_response.status_code == 200
+    assert login_response.json()["instance_id"] == "inst-legacy"
+
+    with session_local() as db:
+        db_user = db.execute(select(PortalUser).where(PortalUser.email == "legacy@example.com")).scalars().one()
+        assert db_user.password_hash is not None
+        assert db_user.password_hash != hashlib.sha256(b"StrongPass123").hexdigest()
+        assert db_user.password_hash.startswith("$argon2")
 
 
 def test_admin_update_user_smoke() -> None:

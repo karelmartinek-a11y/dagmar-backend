@@ -22,7 +22,7 @@ from app.db.session import get_db
 from app.security.lockout import (
     clear_user_lockout,
 )
-from app.security.passwords import hash_password, verify_password
+from app.security.passwords import hash_password, verify_password_details
 from app.security.tokens import issue_instance_token_once, rotate_instance_token
 
 router = APIRouter(prefix="/api/v1/portal", tags=["portal-auth"])
@@ -83,8 +83,12 @@ def portal_login(payload: PortalLoginIn, db: Session = Depends(get_db)):
         _record_login_failure(detail="Neplatne prihlasovaci udaje")
     if user.role != PortalUserRole.EMPLOYEE:
         _record_login_failure(detail="Nepodporovany typ uctu")
-    if not verify_password(payload.password, user.password_hash):
+    password_verification = verify_password_details(payload.password, user.password_hash)
+    if not password_verification.valid:
         _record_login_failure(detail="Neplatne prihlasovaci udaje")
+    if password_verification.needs_rehash:
+        user.password_hash = hash_password(payload.password).value
+        db.add(user)
 
     if not user.instance_id:
         raise HTTPException(status_code=409, detail="Uzivatel nema prirazenu instanci")
