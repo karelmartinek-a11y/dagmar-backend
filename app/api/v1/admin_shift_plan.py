@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_admin, resolve_profile_instance
 from app.db.models import Instance, InstanceStatus, ShiftPlan, ShiftPlanMonthInstance
 from app.db.session import get_db
+from app.services.attendance_profiles import get_profile_by_instance_id, is_date_within_profile_validity
 from app.security.csrf import require_csrf
 from app.utils.timeparse import parse_hhmm_or_none, parse_yyyy_mm_dd
 
@@ -231,6 +232,9 @@ def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut
         departure = parse_hhmm_or_none(body.departure_time)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    attendance_profile = get_profile_by_instance_id(db, profile.id)
+    if not is_date_within_profile_validity(attendance_profile, day):
+        raise HTTPException(status_code=400, detail="Pro zvoleny den neni dochazkovy list platny.")
     if body.status not in (None, "HOLIDAY", "OFF"):
         raise HTTPException(status_code=400, detail="Invalid status, expected HOLIDAY or OFF or null")
     if body.status is not None:

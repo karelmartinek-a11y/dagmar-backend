@@ -239,6 +239,26 @@ class PortalUser(Base):
     )
 
 
+class AttendanceProfile(Base):
+    __tablename__ = "attendance_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    instance: Mapped[Instance] = relationship("Instance")
+
+    __table_args__ = (Index("ix_attendance_profiles_instance_id", "instance_id"),)
+
+
 class PortalUserResetToken(Base):
     __tablename__ = "portal_user_reset_tokens"
 

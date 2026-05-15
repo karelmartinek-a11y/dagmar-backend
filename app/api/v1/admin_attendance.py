@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_admin, resolve_profile_instance
 from app.db.models import Attendance, AttendanceLock, Instance, ShiftPlan
 from app.db.session import get_db
+from app.services.attendance_profiles import get_profile_by_instance_id, is_date_within_profile_validity
 from app.security.csrf import require_csrf
 from app.utils.timeparse import parse_hhmm_or_none, parse_yyyy_mm_dd
 
@@ -26,6 +27,7 @@ class AttendanceDayOut(BaseModel):
     planned_arrival_time: str | None = None
     planned_departure_time: str | None = None
     planned_status: str | None = None
+    is_within_profile_validity: bool = True
 
 
 class AttendanceMonthOut(BaseModel):
@@ -100,6 +102,7 @@ def admin_get_month_attendance(
         # Pokud chybí tabulka shift_plan (např. neproběhla migrace), nepadáme na 500 a jen vrátíme docházku bez plánů.
         logging.getLogger(__name__).warning("ShiftPlan unavailable, skipping planned times: %s", e)
 
+    attendance_profile = get_profile_by_instance_id(db, profile.id)
     days: list[AttendanceDayOut] = []
     cur = start
     while cur < end:
@@ -113,6 +116,7 @@ def admin_get_month_attendance(
                 planned_arrival_time=p.arrival_time if p else None,
                 planned_departure_time=p.departure_time if p else None,
                 planned_status=p.status if p else None,
+                is_within_profile_validity=is_date_within_profile_validity(attendance_profile, cur),
             )
         )
         cur = cur + dt.timedelta(days=1)
@@ -167,6 +171,10 @@ def admin_upsert_attendance(
             Attendance.date == day,
         )
     ).scalar_one_or_none()
+
+    attendance_profile = get_profile_by_instance_id(db, profile.id)
+    if not is_date_within_profile_validity(attendance_profile, day):
+        raise HTTPException(status_code=400, detail="Pro zvoleny den neni dochazkovy list platny.")
 
     if existing is None:
         existing = Attendance(

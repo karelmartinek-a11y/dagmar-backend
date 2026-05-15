@@ -18,6 +18,7 @@ from app.config import Settings, get_settings
 from app.db.models import (
     AppSettings,
     Attendance,
+    AttendanceProfile,
     AttendanceLock,
     AttendanceReminderEvent,
     AuthLockoutState,
@@ -51,6 +52,8 @@ class PortalUserOut(BaseModel):
     employment_template: str | None = None
     has_password: bool
     profile_instance_id: str | None = None
+    attendance_profile_id: str | None = None
+    attendance_profile_label: str | None = None
     is_active: bool
     is_locked: bool = False
     locked_until: str | None = None
@@ -75,6 +78,7 @@ class PortalUserUpdateIn(BaseModel):
     role: str | None = Field(default=None, min_length=1, max_length=32)
     employment_template: str | None = Field(default=None, min_length=3, max_length=16)
     profile_instance_id: str | None = Field(default=None, max_length=36)
+    attendance_profile_id: str | None = Field(default=None, max_length=36)
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=8, max_length=256)
 
@@ -144,7 +148,16 @@ def _resolve_profile_instance_id(user: PortalUser) -> str | None:
     return user.instance.profile_instance_id or user.instance_id
 
 
-def _to_user_out(user: PortalUser, lock_state: AuthLockoutState | None = None) -> PortalUserOut:
+def _resolve_attendance_profile_label(db: Session, instance_id: str | None) -> str | None:
+    if not instance_id:
+        return None
+    row = db.execute(
+        select(AttendanceProfile).where(AttendanceProfile.instance_id == instance_id)
+    ).scalar_one_or_none()
+    return row.label if row else None
+
+
+def _to_user_out(db: Session, user: PortalUser, lock_state: AuthLockoutState | None = None) -> PortalUserOut:
     locked_until = as_utc(lock_state.locked_until) if lock_state is not None else None
     return PortalUserOut(
         id=user.id,
@@ -155,6 +168,8 @@ def _to_user_out(user: PortalUser, lock_state: AuthLockoutState | None = None) -
         employment_template=user.instance.employment_template if user.instance else None,
         has_password=bool(user.password_hash),
         profile_instance_id=_resolve_profile_instance_id(user),
+        attendance_profile_id=user.instance_id,
+        attendance_profile_label=_resolve_attendance_profile_label(db, user.instance_id),
         is_active=user.is_active,
         is_locked=is_locked(lock_state),
         locked_until=locked_until.isoformat() if locked_until is not None else None,
@@ -202,7 +217,7 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
         else []
     )
     locks_by_principal = {row.principal: row for row in lock_rows}
-    out = [_to_user_out(u, locks_by_principal.get(u.email.lower())) for u in rows]
+    out = [_to_user_out(db, u, locks_by_principal.get(u.email.lower())) for u in rows]
     return PortalUserListOut(users=out)
 
 
@@ -246,6 +261,7 @@ def create_user(
             activated_at=now,
         )
         db.add(inst)
+        db.add(AttendanceProfile(instance_id=inst_id, label=f"DL {payload.name.strip()}", valid_from=None, valid_to=None))
 
     user = PortalUser(
         name=payload.name.strip(),
@@ -263,7 +279,7 @@ def create_user(
     db.commit()
     db.refresh(user)
 
-    return _to_user_out(user)
+    return _to_user_out(db, user)
 
 
 @router.put("/{user_id}", response_model=PortalUserOut)
@@ -303,12 +319,20 @@ def update_user(
         except Exception:
             raise HTTPException(status_code=400, detail="Neplatný druh pohledu.") from None
 
-    if payload.profile_instance_id is not None:
-        profile_instance_id = payload.profile_instance_id.strip() or None
+    selected_profile_id = payload.attendance_profile_id
+    if selected_profile_id is None and payload.profile_instance_id is not None:
+        selected_profile_id = payload.profile_instance_id
+    if selected_profile_id is not None:
+        profile_instance_id = selected_profile_id.strip() or None
         if profile_instance_id is not None:
             inst = db.get(Instance, profile_instance_id)
             if inst is None:
-                raise HTTPException(status_code=400, detail="Profilová instance neexistuje.")
+                raise HTTPException(status_code=400, detail="Profilova instance neexistuje.")
+            profile_row = db.execute(
+                select(AttendanceProfile).where(AttendanceProfile.instance_id == profile_instance_id)
+            ).scalar_one_or_none()
+            if profile_row is None:
+                raise HTTPException(status_code=400, detail="Dochazkovy list neexistuje.")
         user.instance_id = profile_instance_id
 
     if payload.employment_template is not None:
@@ -330,7 +354,7 @@ def update_user(
     db.commit()
     db.refresh(user)
 
-    return _to_user_out(user)
+    return _to_user_out(db, user)
 
 
 @router.post("/{user_id}/set-password", response_model=PortalUserOut)
@@ -348,7 +372,7 @@ def set_user_password(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return _to_user_out(user)
+    return _to_user_out(db, user)
 
 
 @router.delete("/{user_id}", response_model=OkOut)

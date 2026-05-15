@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.deps import require_admin, require_instance
-from app.api.v1 import admin_users, attendance, portal_auth
+from app.api.v1 import admin_attendance_profiles, admin_users, attendance, portal_auth
 from app.db.models import (
     Attendance,
     AttendanceLock,
+    AttendanceProfile,
     AuthLockoutState,
     Base,
     ClientType,
@@ -37,6 +38,7 @@ def _build_client() -> tuple[TestClient, sessionmaker[Session]]:
 
     app = FastAPI()
     app.include_router(admin_users.router)
+    app.include_router(admin_attendance_profiles.router)
     app.include_router(attendance.router)
     app.include_router(portal_auth.router)
 
@@ -48,6 +50,7 @@ def _build_client() -> tuple[TestClient, sessionmaker[Session]]:
             db.close()
 
     app.dependency_overrides[admin_users.get_db] = override_db
+    app.dependency_overrides[admin_attendance_profiles.get_db] = override_db
     app.dependency_overrides[attendance.get_db] = override_db
     app.dependency_overrides[portal_auth.get_db] = override_db
     app.dependency_overrides[require_admin] = lambda: {"ok": True}
@@ -84,6 +87,7 @@ def test_portal_login_ignores_existing_lockout_and_uses_password_smoke() -> None
             instance_id=inst.id,
         )
         db.add(inst)
+        db.add(AttendanceProfile(instance_id=inst.id, label="DL Novy Name", valid_from=None, valid_to=None))
         db.add(user)
         db.add(
             AuthLockoutState(
@@ -178,6 +182,7 @@ def test_admin_update_user_smoke() -> None:
             instance_id=inst.id,
         )
         db.add(inst)
+        db.add(AttendanceProfile(instance_id=inst.id, label="DL Pepa", valid_from=None, valid_to=None))
         db.add(user)
         db.commit()
         user_id = user.id
@@ -198,6 +203,7 @@ def test_admin_update_user_smoke() -> None:
     assert payload["email"] == "new@example.com"
     assert payload["phone"] == "+420123456789"
     assert payload["profile_instance_id"] == "inst-1"
+    assert payload["attendance_profile_id"] == "inst-1"
     assert payload["is_active"] is False
 
 
@@ -478,6 +484,7 @@ def test_admin_list_users_includes_lock_state() -> None:
             locked_until=(datetime.now(UTC) + timedelta(minutes=30)).replace(microsecond=0),
         )
         db.add(inst)
+        db.add(AttendanceProfile(instance_id=inst.id, label="DL Locked User", valid_from=None, valid_to=None))
         db.add(user)
         db.add(lock_state)
         db.commit()
@@ -489,3 +496,68 @@ def test_admin_list_users_includes_lock_state() -> None:
     locked_user = next(item for item in payload["users"] if item["email"] == "locked.user@example.com")
     assert locked_user["is_locked"] is True
     assert locked_user["locked_until"] is not None
+
+
+def test_attendance_profile_create_and_assign_to_user() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        user_inst = Instance(
+            id="inst-user-1",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-user-1",
+            status=InstanceStatus.ACTIVE,
+            display_name="User 1",
+            created_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        user = PortalUser(
+            email="assign@example.com",
+            name="Assign User",
+            role=PortalUserRole.EMPLOYEE,
+            instance_id=user_inst.id,
+        )
+        db.add(user_inst)
+        db.add(AttendanceProfile(instance_id=user_inst.id, label="DL Assign User", valid_from=None, valid_to=None))
+        db.add(user)
+        db.commit()
+        user_id = user.id
+
+    create_dl = client.post(
+        "/api/v1/admin/attendance-profiles",
+        json={"label": "Martinek Karel", "valid_from": "2026-01-01", "valid_to": "2026-12-31"},
+    )
+    assert create_dl.status_code == 200
+    created = create_dl.json()
+    assert created["label"].startswith("DL ")
+
+    update_user = client.put(
+        f"/api/v1/admin/users/{user_id}",
+        json={"attendance_profile_id": created["instance_id"]},
+    )
+    assert update_user.status_code == 200
+    assert update_user.json()["attendance_profile_id"] == created["instance_id"]
+
+
+def test_attendance_write_blocked_outside_profile_validity() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        inst = Instance(
+            id="inst-2",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-2",
+            status=InstanceStatus.ACTIVE,
+            display_name="Marie",
+            created_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        db.add(inst)
+        db.add(AttendanceProfile(instance_id=inst.id, label="DL Marie", valid_from=datetime(2026, 4, 1).date(), valid_to=None))
+        db.commit()
+
+    response = client.put(
+        "/api/v1/attendance",
+        json={"date": "2026-03-08", "arrival_time": "08:00", "departure_time": "16:00"},
+    )
+    assert response.status_code == 400
