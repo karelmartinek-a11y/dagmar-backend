@@ -1,4 +1,4 @@
-# ruff: noqa: B008
+﻿# ruff: noqa: B008
 from __future__ import annotations
 
 import hashlib
@@ -128,8 +128,8 @@ def portal_reset(payload: PortalResetIn, db: Session = Depends(get_db)):
         .where(PortalUserResetToken.expires_at > now)
     ).scalars().first()
 
-    if not row or not row.user:
-        raise HTTPException(status_code=400, detail="Odkaz je neplatný nebo vypršel")
+    if not row or not row.user or not row.user.is_active:
+        raise HTTPException(status_code=400, detail="Odkaz je neplatnĂ˝ nebo vyprĹˇel")
 
     try:
         new_hash = hash_password(payload.password)
@@ -144,3 +144,4 @@ def portal_reset(payload: PortalResetIn, db: Session = Depends(get_db)):
     db.commit()
 
     return OkOut(ok=True)
+

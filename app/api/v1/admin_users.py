@@ -346,6 +346,9 @@ def update_user(
 
     if payload.is_active is not None:
         user.is_active = payload.is_active
+        if not payload.is_active:
+            db.execute(delete(PortalUserResetToken).where(PortalUserResetToken.user_id == user.id))
+            _invalidate_instance_token(user, db)
 
     if payload.password is not None:
         _apply_password(db, user, payload.password)

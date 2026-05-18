@@ -22,6 +22,7 @@ from app.db.models import (
     InstanceStatus,
     PortalUser,
     PortalUserRole,
+    PortalUserResetToken,
 )
 from app.security.csrf import require_csrf
 from app.security.passwords import hash_password
@@ -160,6 +161,44 @@ def test_portal_login_accepts_legacy_sha256_hash_and_rehashes_smoke() -> None:
         assert db_user.password_hash is not None
         assert db_user.password_hash != hashlib.sha256(b"StrongPass123").hexdigest()
         assert db_user.password_hash.startswith("$argon2")
+
+
+def test_portal_reset_rejects_inactive_user() -> None:
+    client, session_local = _build_client()
+
+    with session_local() as db:
+        inst = Instance(
+            id="inst-reset-inactive",
+            client_type=ClientType.WEB,
+            device_fingerprint="fp-reset-inactive",
+            status=InstanceStatus.ACTIVE,
+            display_name="Inactive",
+            created_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        user = PortalUser(
+            email="inactive@example.com",
+            name="Inactive User",
+            role=PortalUserRole.EMPLOYEE,
+            password_hash=hash_password("StrongPass123").value,
+            is_active=False,
+            instance_id=inst.id,
+        )
+        db.add(inst)
+        db.add(user)
+        db.flush()
+        raw_token = "reset-token-inactive"
+        db.add(
+            PortalUserResetToken(
+                user_id=user.id,
+                token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        db.commit()
+
+    response = client.post("/api/v1/portal/reset", json={"token": "reset-token-inactive", "password": "NewStrongPass123"})
+    assert response.status_code == 400
 
 
 def test_admin_update_user_smoke() -> None:
