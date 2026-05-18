@@ -90,11 +90,20 @@ jobs:
             /opt/dagmar/backend/.venv/bin/pip install /opt/dagmar/backend
             cd /opt/dagmar/backend
             printf '{"backend_commit":"%s"}\n' "$DEPLOY_TAG" > /opt/dagmar/backend/backend-version.json
-            /opt/dagmar/backend/.venv/bin/alembic -c /opt/dagmar/backend/app/db/alembic.ini upgrade head
+            if [ -f /opt/dagmar/backend/.env ]; then
+              set -a
+              . /opt/dagmar/backend/.env
+              set +a
+            fi
+            if [ -n "${DAGMAR_DATABASE_URL:-}" ]; then
+              /opt/dagmar/backend/.venv/bin/alembic -c /opt/dagmar/backend/app/db/alembic.ini upgrade head
+            else
+              echo "DAGMAR_DATABASE_URL neni nastavena, migrace preskakuji."
+            fi
             sudo systemctl restart dagmar-backend
             if docker info >/dev/null 2>&1; then
               cd /opt/dagmar/sandbox && ./run-tests.sh
             else
               echo "Docker neni dostupny, sandbox testy preskakuji."
             fi
-            printf '%s DAGMAR backend: auto-deploy main\n' \"$(date '+%F %T')\" >> /var/log/dagmar/deploy.log
+            printf '%s DAGMAR backend: auto-deploy main\n' \"$(date '+%F %T')\" >> /var/log/dagmar/deploy.log || true
