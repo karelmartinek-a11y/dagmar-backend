@@ -31,7 +31,7 @@ from app.security.crypto import decrypt_secret
 from app.security.csrf import require_csrf
 from app.security.lockout import as_utc, clear_user_lockout, is_locked, revoke_unlock_tokens
 from app.security.passwords import hash_password
-from app.services.employment_access import employment_is_within_login_window, employment_label, select_login_employments
+from app.services.employment_access import employment_label, select_login_employments
 from app.services.prague_time import prague_today
 
 router = APIRouter(prefix="/api/v1/admin/users", tags=["admin-users"])

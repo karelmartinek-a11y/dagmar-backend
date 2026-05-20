@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from collections.abc import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field

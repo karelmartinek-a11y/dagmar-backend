@@ -21,7 +21,11 @@ from app.db.session import get_db
 from app.security.lockout import clear_user_lockout
 from app.security.passwords import hash_password, verify_password_details
 from app.security.tokens import issue_instance_token_once, rotate_instance_token
-from app.services.employment_access import employment_is_valid_on_day, employment_label, select_login_employments
+from app.services.employment_access import (
+    employment_is_valid_on_day,
+    employment_label,
+    select_login_employments,
+)
 from app.services.prague_time import prague_today
 
 router = APIRouter(prefix="/api/v1/portal", tags=["portal-auth"])

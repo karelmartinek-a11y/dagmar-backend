@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import PortalUserAuth, require_portal_user_auth
 from app.db.models import Attendance, Employment, ShiftPlan
 from app.db.session import get_db
-from app.services.employment_access import employment_is_valid_on_day, employment_label
+from app.services.employment_access import employment_label
 from app.services.prague_time import prague_minutes_since_midnight, prague_today
 from app.utils.timeparse import parse_hhmm_or_none
 

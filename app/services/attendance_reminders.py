@@ -191,8 +191,6 @@ def process_attendance_reminders(
 
     for employment in eligible_employments:
         user = employment.user
-        if user is None:
-            continue
         plan = plan_by_key.get((employment.id, today))
         attendance = attendance_by_key.get((employment.id, today))
         previous_day_attendance = attendance_by_key.get((employment.id, yesterday))

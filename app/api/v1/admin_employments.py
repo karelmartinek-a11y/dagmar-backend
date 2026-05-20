@@ -4,18 +4,28 @@ from __future__ import annotations
 import calendar
 from dataclasses import dataclass
 from datetime import date
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
 from app.api.v1.admin_users import EmploymentOut, _to_employment_out
-from app.db.models import Attendance, AttendanceLock, AttendanceReminderEvent, Employment, PortalUser, ShiftPlan, ShiftPlanMonthInstance
+from app.db.models import (
+    Attendance,
+    AttendanceLock,
+    AttendanceReminderEvent,
+    Employment,
+    PortalUser,
+    ShiftPlan,
+    ShiftPlanMonthInstance,
+)
 from app.db.session import get_db
 from app.security.csrf import require_csrf
-from app.services.employment_access import employment_label, employment_overlaps_month, employment_type_is_valid
+from app.services.employment_access import employment_type_is_valid
 
 router = APIRouter(tags=["admin-employments"])
 
@@ -181,19 +191,39 @@ def _raise_range_conflict(summary: RangeConflictSummary) -> None:
     )
 
 
+def _delete_row_count(result: CursorResult[Any]) -> int:
+    return int(result.rowcount or 0)
+
+
+def _out_of_range_clause(column, start_date: date, end_date: date | None):
+    if end_date is None:
+        return column < start_date
+    return or_(column < start_date, column > end_date)
+
+
 def _delete_out_of_range_records(employment_id: int, start_date: date, end_date: date | None, db: Session) -> EmploymentDeleteOut:
-    attendance_deleted = db.execute(
-        delete(Attendance).where(
-            Attendance.employment_id == employment_id,
-            or_(Attendance.date < start_date, Attendance.date > end_date if end_date is not None else False),
+    attendance_deleted = _delete_row_count(
+        cast(
+            CursorResult[Any],
+            db.execute(
+                delete(Attendance).where(
+                    Attendance.employment_id == employment_id,
+                    _out_of_range_clause(Attendance.date, start_date, end_date),
+                )
+            ),
         )
-    ).rowcount or 0
-    shift_plan_deleted = db.execute(
-        delete(ShiftPlan).where(
-            ShiftPlan.employment_id == employment_id,
-            or_(ShiftPlan.date < start_date, ShiftPlan.date > end_date if end_date is not None else False),
+    )
+    shift_plan_deleted = _delete_row_count(
+        cast(
+            CursorResult[Any],
+            db.execute(
+                delete(ShiftPlan).where(
+                    ShiftPlan.employment_id == employment_id,
+                    _out_of_range_clause(ShiftPlan.date, start_date, end_date),
+                )
+            ),
         )
-    ).rowcount or 0
+    )
 
     lock_rows = (
         db.execute(select(AttendanceLock.id, AttendanceLock.year, AttendanceLock.month).where(AttendanceLock.employment_id == employment_id))
@@ -201,7 +231,9 @@ def _delete_out_of_range_records(employment_id: int, start_date: date, end_date:
     )
     lock_ids = [row[0] for row in lock_rows if _month_record_out_of_range(row[1], row[2], start_date, end_date)]
     attendance_lock_deleted = (
-        db.execute(delete(AttendanceLock).where(AttendanceLock.id.in_(lock_ids))).rowcount or 0 if lock_ids else 0
+        _delete_row_count(cast(CursorResult[Any], db.execute(delete(AttendanceLock).where(AttendanceLock.id.in_(lock_ids)))))
+        if lock_ids
+        else 0
     )
 
     selection_rows = (
@@ -213,20 +245,22 @@ def _delete_out_of_range_records(employment_id: int, start_date: date, end_date:
     )
     selection_ids = [row[0] for row in selection_rows if _month_record_out_of_range(row[1], row[2], start_date, end_date)]
     shift_plan_selection_deleted = (
-        db.execute(delete(ShiftPlanMonthInstance).where(ShiftPlanMonthInstance.id.in_(selection_ids))).rowcount or 0
+        _delete_row_count(cast(CursorResult[Any], db.execute(delete(ShiftPlanMonthInstance).where(ShiftPlanMonthInstance.id.in_(selection_ids)))))
         if selection_ids
         else 0
     )
 
-    reminder_deleted = db.execute(
-        delete(AttendanceReminderEvent).where(
-            AttendanceReminderEvent.employment_id == employment_id,
-            or_(
-                AttendanceReminderEvent.attendance_date < start_date,
-                AttendanceReminderEvent.attendance_date > end_date if end_date is not None else False,
+    reminder_deleted = _delete_row_count(
+        cast(
+            CursorResult[Any],
+            db.execute(
+                delete(AttendanceReminderEvent).where(
+                    AttendanceReminderEvent.employment_id == employment_id,
+                    _out_of_range_clause(AttendanceReminderEvent.attendance_date, start_date, end_date),
+                )
             ),
         )
-    ).rowcount or 0
+    )
 
     return EmploymentDeleteOut(
         ok=True,
