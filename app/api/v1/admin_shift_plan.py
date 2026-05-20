@@ -6,6 +6,7 @@ import datetime as dt
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import require_admin
@@ -136,13 +137,18 @@ def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int) -> S
     available_out = [_to_active_employment_out(item) for item in available_employments]
     available_ids = [item.id for item in available_employments]
 
-    selected = db.execute(
-        select(ShiftPlanMonthInstance)
-        .where(ShiftPlanMonthInstance.year == year)
-        .where(ShiftPlanMonthInstance.month == month)
-        .order_by(ShiftPlanMonthInstance.id.asc())
-    ).scalars().all()
-    selected_ids = [row.employment_id for row in selected]
+    try:
+        selected = db.execute(
+            select(ShiftPlanMonthInstance)
+            .where(ShiftPlanMonthInstance.year == year)
+            .where(ShiftPlanMonthInstance.month == month)
+            .order_by(ShiftPlanMonthInstance.id.asc())
+        ).scalars().all()
+        selected_ids = [row.employment_id for row in selected]
+    except SQLAlchemyError:
+        # Na starších produkčních datech může selhat pouze tabulka výběru měsíce.
+        # Pro samotné zobrazení plánu je bezpečné spadnout zpět na všechny dostupné úvazky.
+        selected_ids = []
     if not selected_ids:
         selected_ids = available_ids
     if not selected_ids:
