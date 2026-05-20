@@ -13,8 +13,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import String, delete, select
-from sqlalchemy import cast as sa_cast
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import require_admin
@@ -256,7 +255,6 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
             users_table.c.name,
             users_table.c.email,
             users_table.c.phone,
-            sa_cast(users_table.c["role"], String).label("role"),
             users_table.c.password_hash,
             users_table.c.is_active,
         ).order_by(users_table.c.name.asc())
@@ -278,19 +276,22 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
     if not user_ids:
         return PortalUserListOut(users=[])
 
-    employment_rows = db.execute(
-        select(
-            employments_table.c.id,
-            employments_table.c.user_id,
-            employments_table.c.title,
-            employments_table.c.employment_type,
-            employments_table.c.start_date,
-            employments_table.c.end_date,
-            employments_table.c.is_active,
-        )
-        .where(employments_table.c.user_id.in_(user_ids))
-        .order_by(employments_table.c.start_date.asc(), employments_table.c.id.asc())
-    ).mappings().all()
+    try:
+        employment_rows = db.execute(
+            select(
+                employments_table.c.id,
+                employments_table.c.user_id,
+                employments_table.c.title,
+                employments_table.c.employment_type,
+                employments_table.c.start_date,
+                employments_table.c.end_date,
+                employments_table.c.is_active,
+            )
+            .where(employments_table.c.user_id.in_(user_ids))
+            .order_by(employments_table.c.start_date.asc(), employments_table.c.id.asc())
+        ).mappings().all()
+    except Exception:
+        employment_rows = []
 
     employments_by_user: dict[int, list[SimpleNamespace]] = {}
     for row in employment_rows:
@@ -310,16 +311,19 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
         employments_by_user.setdefault(employment.user_id, []).append(employment)
 
     principals = [str(row["email"]).lower() for _, row in safe_user_rows if row["email"]]
-    lock_rows = (
-        db.execute(
-            select(AuthLockoutState).where(
-                AuthLockoutState.actor_type == "portal",
-                AuthLockoutState.principal.in_(principals),
-            )
-        ).scalars().all()
-        if principals
-        else []
-    )
+    try:
+        lock_rows = (
+            db.execute(
+                select(AuthLockoutState).where(
+                    AuthLockoutState.actor_type == "portal",
+                    AuthLockoutState.principal.in_(principals),
+                )
+            ).scalars().all()
+            if principals
+            else []
+        )
+    except Exception:
+        lock_rows = []
     locks_by_principal = {row.principal: row for row in lock_rows}
 
     out: list[PortalUserOut] = []
@@ -336,7 +340,7 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
                 name=name,
                 email=email,
                 phone=row["phone"],
-                role=SimpleNamespace(value=str(row["role"] or "").strip() or "employee"),
+                role=SimpleNamespace(value="employee"),
                 password_hash=row["password_hash"],
                 is_active=bool(row["is_active"]),
                 employments=employments,
