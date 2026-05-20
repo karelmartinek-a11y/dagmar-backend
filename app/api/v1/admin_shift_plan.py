@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import datetime as dt
-import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import require_admin
@@ -129,17 +127,14 @@ def admin_get_shift_plan_month(
     _admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> ShiftPlanMonthOut:
-    try:
-        return _admin_get_shift_plan_month_impl(db=db, year=year, month=month)
-    except SQLAlchemyError as exc:
-        logging.getLogger(__name__).warning("Shift plan tables unavailable: %s", exc)
-        return ShiftPlanMonthOut(year=year, month=month, selected_employment_ids=[], available_employments=[], rows=[])
+    return _admin_get_shift_plan_month_impl(db=db, year=year, month=month)
 
 
 def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int) -> ShiftPlanMonthOut:
     start, end = _month_range(year, month)
     available_employments = _load_available_employments(db, year, month)
     available_out = [_to_active_employment_out(item) for item in available_employments]
+    available_ids = [item.id for item in available_employments]
 
     selected = db.execute(
         select(ShiftPlanMonthInstance)
@@ -148,6 +143,8 @@ def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int) -> S
         .order_by(ShiftPlanMonthInstance.id.asc())
     ).scalars().all()
     selected_ids = [row.employment_id for row in selected]
+    if not selected_ids:
+        selected_ids = available_ids
     if not selected_ids:
         return ShiftPlanMonthOut(year=year, month=month, selected_employment_ids=[], available_employments=available_out, rows=[])
 
@@ -214,11 +211,7 @@ def admin_upsert_shift_plan(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> OkOut:
-    try:
-        return _admin_upsert_shift_plan_impl(db=db, body=body)
-    except SQLAlchemyError as exc:
-        logging.getLogger(__name__).warning("Shift plan write failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Shift plan storage is not available") from exc
+    return _admin_upsert_shift_plan_impl(db=db, body=body)
 
 
 def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut:
@@ -282,11 +275,7 @@ def admin_set_shift_plan_selection(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> OkOut:
-    try:
-        return _admin_set_shift_plan_selection_impl(db=db, body=body)
-    except SQLAlchemyError as exc:
-        logging.getLogger(__name__).warning("Shift plan selection write failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Shift plan storage is not available") from exc
+    return _admin_set_shift_plan_selection_impl(db=db, body=body)
 
 
 def _admin_set_shift_plan_selection_impl(db: Session, body: ShiftPlanSelectionIn) -> OkOut:

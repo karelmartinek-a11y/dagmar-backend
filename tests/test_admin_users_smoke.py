@@ -293,3 +293,33 @@ def test_attendance_and_shift_plan_are_stored_by_employment_id() -> None:
         assert shift_plan_row.employment_id == employment_id
         assert attendance_row.instance_id == instance_id
         assert shift_plan_row.instance_id == instance_id
+
+
+def test_shift_plan_defaults_to_all_available_employments_when_month_has_no_selection() -> None:
+    client, session_local = _build_client()
+    with session_local() as db:
+        first_user = _create_user(db, email="plan-first@example.com", name="První Uživatel")
+        second_user = _create_user(db, email="plan-second@example.com", name="Druhý Uživatel")
+        first_employment = _add_employment(db, first_user, start_date=date(2025, 1, 1), title="Recepce")
+        second_employment = _add_employment(db, second_user, start_date=date(2025, 1, 1), title="Úklid")
+        first_employment_id = first_employment.id
+        second_employment_id = second_employment.id
+        db.add(
+            ShiftPlan(
+                employment_id=first_employment_id,
+                instance_id=first_user.instance_id,
+                date=date(2026, 5, 10),
+                arrival_time="08:00",
+                departure_time="16:00",
+            )
+        )
+        db.commit()
+
+    response = client.get("/api/v1/admin/shift-plan?year=2026&month=5")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["selected_employment_ids"] == [first_employment_id, second_employment_id]
+    assert [row["employment_id"] for row in payload["rows"]] == [first_employment_id, second_employment_id]
+    assert payload["rows"][0]["days"][9]["arrival_time"] == "08:00"
+    assert payload["rows"][1]["days"][9]["arrival_time"] is None

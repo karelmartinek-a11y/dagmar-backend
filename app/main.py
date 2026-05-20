@@ -27,6 +27,7 @@ from app.api.v1.portal_auth import router as portal_auth_router
 from app.api.v1.public_instances import router as public_instances_router
 from app.brand.brand import APP_NAME_LONG
 from app.config import Settings, get_settings
+from app.db.schema_bootstrap import ensure_schema_up_to_date
 from app.db.session import get_sessionmaker
 from app.security.rate_limit import init_rate_limiting, limiter
 from app.services.attendance_reminders import run_attendance_reminders_once
@@ -64,6 +65,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         stop_event: Event | None = None
         thread: Thread | None = None
+
+        ensure_schema_up_to_date(settings)
 
         if not settings.database_url.startswith("sqlite"):
             stop_event = Event()

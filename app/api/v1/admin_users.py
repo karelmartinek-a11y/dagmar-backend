@@ -276,22 +276,19 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
     if not user_ids:
         return PortalUserListOut(users=[])
 
-    try:
-        employment_rows = db.execute(
-            select(
-                employments_table.c.id,
-                employments_table.c.user_id,
-                employments_table.c.title,
-                employments_table.c.employment_type,
-                employments_table.c.start_date,
-                employments_table.c.end_date,
-                employments_table.c.is_active,
-            )
-            .where(employments_table.c.user_id.in_(user_ids))
-            .order_by(employments_table.c.start_date.asc(), employments_table.c.id.asc())
-        ).mappings().all()
-    except Exception:
-        employment_rows = []
+    employment_rows = db.execute(
+        select(
+            employments_table.c.id,
+            employments_table.c.user_id,
+            employments_table.c.title,
+            employments_table.c.employment_type,
+            employments_table.c.start_date,
+            employments_table.c.end_date,
+            employments_table.c.is_active,
+        )
+        .where(employments_table.c.user_id.in_(user_ids))
+        .order_by(employments_table.c.start_date.asc(), employments_table.c.id.asc())
+    ).mappings().all()
 
     employments_by_user: dict[int, list[SimpleNamespace]] = {}
     for row in employment_rows:
@@ -311,19 +308,16 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
         employments_by_user.setdefault(employment.user_id, []).append(employment)
 
     principals = [str(row["email"]).lower() for _, row in safe_user_rows if row["email"]]
-    try:
-        lock_rows = (
-            db.execute(
-                select(AuthLockoutState).where(
-                    AuthLockoutState.actor_type == "portal",
-                    AuthLockoutState.principal.in_(principals),
-                )
-            ).scalars().all()
-            if principals
-            else []
-        )
-    except Exception:
-        lock_rows = []
+    lock_rows = (
+        db.execute(
+            select(AuthLockoutState).where(
+                AuthLockoutState.actor_type == "portal",
+                AuthLockoutState.principal.in_(principals),
+            )
+        ).scalars().all()
+        if principals
+        else []
+    )
     locks_by_principal = {row.principal: row for row in lock_rows}
 
     out: list[PortalUserOut] = []

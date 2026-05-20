@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import datetime as dt
-import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import require_admin
@@ -96,17 +94,13 @@ def admin_get_month_attendance(
     ).scalars().all()
     by_date: dict[dt.date, Attendance] = {r.date: r for r in rows}
 
-    plan_by_date: dict[dt.date, ShiftPlan] = {}
-    try:
-        plan_rows = db.execute(
-            select(ShiftPlan)
-            .where(ShiftPlan.employment_id == employment.id)
-            .where(ShiftPlan.date >= start)
-            .where(ShiftPlan.date < end)
-        ).scalars().all()
-        plan_by_date = {r.date: r for r in plan_rows}
-    except SQLAlchemyError as exc:
-        logging.getLogger(__name__).warning("ShiftPlan unavailable, skipping planned times: %s", exc)
+    plan_rows = db.execute(
+        select(ShiftPlan)
+        .where(ShiftPlan.employment_id == employment.id)
+        .where(ShiftPlan.date >= start)
+        .where(ShiftPlan.date < end)
+    ).scalars().all()
+    plan_by_date: dict[dt.date, ShiftPlan] = {r.date: r for r in plan_rows}
 
     days: list[AttendanceDayOut] = []
     cur = start
@@ -126,20 +120,16 @@ def admin_get_month_attendance(
         )
         cur = cur + dt.timedelta(days=1)
 
-    locked = False
-    try:
-        locked = (
-            db.execute(
-                select(AttendanceLock).where(
-                    AttendanceLock.employment_id == employment.id,
-                    AttendanceLock.year == year,
-                    AttendanceLock.month == month,
-                )
-            ).scalar_one_or_none()
-            is not None
-        )
-    except SQLAlchemyError as exc:
-        logging.getLogger(__name__).warning("AttendanceLock unavailable, treating as unlocked: %s", exc)
+    locked = (
+        db.execute(
+            select(AttendanceLock).where(
+                AttendanceLock.employment_id == employment.id,
+                AttendanceLock.year == year,
+                AttendanceLock.month == month,
+            )
+        ).scalar_one_or_none()
+        is not None
+    )
 
     return AttendanceMonthOut(
         employment_id=employment.id,
