@@ -11,35 +11,43 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import require_admin
 from app.config import Settings, get_settings
 from app.db.models import (
     AppSettings,
-    Attendance,
-    AttendanceLock,
-    AttendanceReminderEvent,
     AuthLockoutState,
     ClientType,
-    EmploymentTemplate,
+    Employment,
     Instance,
     InstanceStatus,
     PortalUser,
     PortalUserResetToken,
     PortalUserRole,
-    ShiftPlan,
-    ShiftPlanMonthInstance,
 )
 from app.db.session import get_db
 from app.security.crypto import decrypt_secret
 from app.security.csrf import require_csrf
 from app.security.lockout import as_utc, clear_user_lockout, is_locked, revoke_unlock_tokens
 from app.security.passwords import hash_password
+from app.services.employment_access import employment_is_within_login_window, employment_label, select_login_employments
+from app.services.prague_time import prague_today
 
 router = APIRouter(prefix="/api/v1/admin/users", tags=["admin-users"])
 
 RESET_TTL_HOURS = 24
+
+
+class EmploymentOut(BaseModel):
+    id: int
+    user_id: int
+    title: str
+    employment_type: str
+    start_date: str
+    end_date: str | None = None
+    is_active: bool
+    label: str
 
 
 class PortalUserOut(BaseModel):
@@ -48,12 +56,13 @@ class PortalUserOut(BaseModel):
     email: str
     phone: str | None = None
     role: str
-    employment_template: str | None = None
     has_password: bool
-    profile_instance_id: str | None = None
     is_active: bool
     is_locked: bool = False
     locked_until: str | None = None
+    login_status: str
+    login_status_reason: str | None = None
+    employments: list[EmploymentOut]
 
 
 class PortalUserListOut(BaseModel):
@@ -63,9 +72,10 @@ class PortalUserListOut(BaseModel):
 class PortalUserCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     email: str = Field(min_length=3, max_length=160)
+    phone: str | None = Field(default=None, max_length=32)
     role: str = Field(min_length=1, max_length=32)
-    employment_template: str | None = Field(default=None, min_length=3, max_length=16)
     password: str | None = Field(default=None, min_length=8, max_length=256)
+    is_active: bool = True
 
 
 class PortalUserUpdateIn(BaseModel):
@@ -73,8 +83,6 @@ class PortalUserUpdateIn(BaseModel):
     email: str | None = Field(default=None, min_length=3, max_length=160)
     phone: str | None = Field(default=None, max_length=32)
     role: str | None = Field(default=None, min_length=1, max_length=32)
-    employment_template: str | None = Field(default=None, min_length=3, max_length=16)
-    profile_instance_id: str | None = Field(default=None, max_length=36)
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=8, max_length=256)
 
@@ -100,7 +108,7 @@ def _get_settings(db: Session) -> AppSettings:
 def _send_reset_email(*, settings: Settings, cfg: AppSettings, to_email: str, reset_url: str) -> None:
     host = (cfg.smtp_host or "").strip()
     if not host or not cfg.smtp_port:
-        raise ValueError("SMTP není nastaveno.")
+        raise ValueError("SMTP neni nastaveno.")
 
     username = (cfg.smtp_username or "").strip()
     smtp_secret = settings.smtp_password_secret or settings.session_secret
@@ -109,17 +117,17 @@ def _send_reset_email(*, settings: Settings, cfg: AppSettings, to_email: str, re
     security = (cfg.smtp_security or "SSL").strip().upper()
     from_email = (cfg.smtp_from_email or username or "").strip()
     if not from_email:
-        raise ValueError("Chybí odesílací e-mail.")
+        raise ValueError("Chybi odesilaci e-mail.")
 
     msg = EmailMessage()
-    msg["Subject"] = "Nastavení nebo změna hesla"
+    msg["Subject"] = "Nastaveni nebo zmena hesla"
     msg["From"] = f"{cfg.smtp_from_name} <{from_email}>" if cfg.smtp_from_name else from_email
     msg["To"] = to_email
     msg.set_content(
-        "Dobrý den,\n\n"
-        "pro nastavení nebo změnu hesla použijte tento odkaz (platnost 24 hodin):\n\n"
+        "Dobry den,\n\n"
+        "pro nastaveni nebo zmenu hesla pouzijte tento odkaz (platnost 24 hodin):\n\n"
         f"{reset_url}\n\n"
-        "Pokud jste o změnu nežádali, ignorujte tento e-mail."
+        "Pokud jste o zmenu nezadali, ignorujte tento e-mail."
     )
 
     server: smtplib.SMTP
@@ -138,26 +146,55 @@ def _send_reset_email(*, settings: Settings, cfg: AppSettings, to_email: str, re
         server.quit()
 
 
-def _resolve_profile_instance_id(user: PortalUser) -> str | None:
-    if not user.instance:
+def _normalize_phone(raw_phone: str | None) -> str | None:
+    if raw_phone is None:
         return None
-    return user.instance.profile_instance_id or user.instance_id
+    phone = raw_phone.strip()
+    return phone or None
+
+
+def _to_employment_out(employment: Employment) -> EmploymentOut:
+    return EmploymentOut(
+        id=employment.id,
+        user_id=employment.user_id,
+        title=employment.title,
+        employment_type=employment.employment_type,
+        start_date=employment.start_date.isoformat(),
+        end_date=employment.end_date.isoformat() if employment.end_date is not None else None,
+        is_active=employment.is_active,
+        label=employment_label(employment),
+    )
+
+
+def _user_login_status(user: PortalUser) -> tuple[str, str | None]:
+    if not user.is_active:
+        return "DEACTIVATED", "Ucet je rucne deaktivovany administratorem."
+    today = prague_today()
+    selection = select_login_employments(user, today)
+    if selection.available:
+        return "ACTIVE", None
+    if user.employments:
+        return "EMPLOYMENT_WINDOW_BLOCKED", "Zadny uvazek neni v povolenem prihlasovacim okne."
+    return "EMPLOYMENT_WINDOW_BLOCKED", "Uzivatel nema zadny uvazek."
 
 
 def _to_user_out(user: PortalUser, lock_state: AuthLockoutState | None = None) -> PortalUserOut:
     locked_until = as_utc(lock_state.locked_until) if lock_state is not None else None
+    login_status, login_status_reason = _user_login_status(user)
+    employments = sorted(user.employments, key=lambda item: (item.start_date, item.id))
     return PortalUserOut(
         id=user.id,
         name=user.name,
         email=user.email,
         phone=user.phone,
         role=user.role.value,
-        employment_template=user.instance.employment_template if user.instance else None,
         has_password=bool(user.password_hash),
-        profile_instance_id=_resolve_profile_instance_id(user),
         is_active=user.is_active,
         is_locked=is_locked(lock_state),
         locked_until=locked_until.isoformat() if locked_until is not None else None,
+        login_status=login_status,
+        login_status_reason=login_status_reason,
+        employments=[_to_employment_out(item) for item in employments],
     )
 
 
@@ -189,7 +226,11 @@ def _apply_password(db: Session, user: PortalUser, raw_password: str | None) -> 
 
 @router.get("", response_model=PortalUserListOut)
 def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
-    rows = db.execute(select(PortalUser).order_by(PortalUser.name.asc())).scalars().all()
+    rows = (
+        db.execute(select(PortalUser).options(selectinload(PortalUser.employments)).order_by(PortalUser.name.asc()))
+        .scalars()
+        .all()
+    )
     principals = [user.email.lower() for user in rows if user.email]
     lock_rows = (
         db.execute(
@@ -215,44 +256,39 @@ def create_user(
 ):
     email = payload.email.strip().lower()
     if email == "provoz@hotelchodovasc.cz":
-        raise HTTPException(status_code=400, detail="Tento e-mail je vyhrazen pro admin účet.")
+        raise HTTPException(status_code=400, detail="Tento e-mail je vyhrazen pro admin ucet.")
 
     try:
         role_enum = PortalUserRole(payload.role)
     except Exception:
-        raise HTTPException(status_code=400, detail="Neplatný druh pohledu.") from None
-
-    template = payload.employment_template or EmploymentTemplate.DPP_DPC.value
-    if template not in {EmploymentTemplate.DPP_DPC.value, EmploymentTemplate.HPP.value}:
-        raise HTTPException(status_code=400, detail="Neplatný druh úvazku.")
+        raise HTTPException(status_code=400, detail="Neplatna role uzivatele.") from None
 
     exists = db.execute(select(PortalUser).where(PortalUser.email == email)).scalars().first()
     if exists:
-        raise HTTPException(status_code=409, detail="Uživatel s tímto e-mailem už existuje.")
+        raise HTTPException(status_code=409, detail="Uzivatel s timto e-mailem uz existuje.")
 
-    inst_id = None
-    if role_enum == PortalUserRole.EMPLOYEE:
-        now = datetime.now(UTC)
-        inst_id = str(uuid4())
-        inst = Instance(
-            id=inst_id,
-            client_type=ClientType.WEB,
-            device_fingerprint=f"user:{inst_id}",
-            status=InstanceStatus.ACTIVE,
-            display_name=payload.name.strip(),
-            employment_template=template,
-            created_at=now,
-            last_seen_at=now,
-            activated_at=now,
-        )
-        db.add(inst)
+    now = datetime.now(UTC)
+    inst = Instance(
+        id=str(uuid4()),
+        client_type=ClientType.WEB,
+        device_fingerprint=f"user:{email}",
+        status=InstanceStatus.ACTIVE,
+        display_name=payload.name.strip(),
+        employment_template="DPP_DPC",
+        created_at=now,
+        last_seen_at=now,
+        activated_at=now,
+    )
+    db.add(inst)
 
     user = PortalUser(
         name=payload.name.strip(),
         email=email,
+        phone=_normalize_phone(payload.phone),
         role=role_enum,
         password_hash=None,
-        instance_id=inst_id,
+        is_active=payload.is_active,
+        instance_id=inst.id,
     )
     db.add(user)
     db.flush()
@@ -262,7 +298,12 @@ def create_user(
 
     db.commit()
     db.refresh(user)
-
+    db.refresh(inst)
+    user = (
+        db.execute(select(PortalUser).options(selectinload(PortalUser.employments)).where(PortalUser.id == user.id))
+        .scalars()
+        .one()
+    )
     return _to_user_out(user)
 
 
@@ -274,54 +315,47 @@ def update_user(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ):
-    user = db.get(PortalUser, int(user_id))
+    user = (
+        db.execute(select(PortalUser).options(selectinload(PortalUser.employments)).where(PortalUser.id == int(user_id)))
+        .scalars()
+        .first()
+    )
     if user is None:
         raise HTTPException(status_code=404, detail="Uzivatel nenalezen.")
 
     if payload.name is not None:
         user.name = payload.name.strip()
+        if user.instance is not None:
+            user.instance.display_name = user.name
+            db.add(user.instance)
 
     if payload.phone is not None:
-        raw_phone = payload.phone.strip()
-        user.phone = raw_phone or None
+        user.phone = _normalize_phone(payload.phone)
 
     if payload.email is not None:
         email = payload.email.strip().lower()
         if email == "provoz@hotelchodovasc.cz":
-            raise HTTPException(status_code=400, detail="Tento e-mail je vyhrazen pro admin účet.")
+            raise HTTPException(status_code=400, detail="Tento e-mail je vyhrazen pro admin ucet.")
         if email != user.email:
             exists = db.execute(
                 select(PortalUser).where(PortalUser.email == email).where(PortalUser.id != user.id)
             ).scalars().first()
             if exists:
-                raise HTTPException(status_code=409, detail="Uživatel s tímto e-mailem už existuje.")
-        user.email = email
+                raise HTTPException(status_code=409, detail="Uzivatel s timto e-mailem uz existuje.")
+            clear_user_lockout(db, actor_type="portal", principal=user.email.lower())
+            revoke_unlock_tokens(db, actor_type="portal", principal=user.email.lower())
+            user.email = email
 
     if payload.role is not None:
         try:
             user.role = PortalUserRole(payload.role)
         except Exception:
-            raise HTTPException(status_code=400, detail="Neplatný druh pohledu.") from None
-
-    if payload.profile_instance_id is not None:
-        profile_instance_id = payload.profile_instance_id.strip() or None
-        if profile_instance_id is not None:
-            inst = db.get(Instance, profile_instance_id)
-            if inst is None:
-                raise HTTPException(status_code=400, detail="Profilová instance neexistuje.")
-        user.instance_id = profile_instance_id
-
-    if payload.employment_template is not None:
-        template = payload.employment_template.strip()
-        if template not in {EmploymentTemplate.DPP_DPC.value, EmploymentTemplate.HPP.value}:
-            raise HTTPException(status_code=400, detail="Neplatný druh úvazku.")
-        linked_instance = db.get(Instance, user.instance_id) if user.instance_id else None
-        if linked_instance is None:
-            raise HTTPException(status_code=400, detail="Uživatel nemá přiřazenou instanci pro změnu úvazku.")
-        linked_instance.employment_template = template
+            raise HTTPException(status_code=400, detail="Neplatna role uzivatele.") from None
 
     if payload.is_active is not None:
         user.is_active = payload.is_active
+        if not payload.is_active:
+            _invalidate_instance_token(user, db)
 
     if payload.password is not None:
         _apply_password(db, user, payload.password)
@@ -329,7 +363,11 @@ def update_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-
+    user = (
+        db.execute(select(PortalUser).options(selectinload(PortalUser.employments)).where(PortalUser.id == user.id))
+        .scalars()
+        .one()
+    )
     return _to_user_out(user)
 
 
@@ -341,9 +379,13 @@ def set_user_password(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ):
-    user = db.get(PortalUser, int(user_id))
+    user = (
+        db.execute(select(PortalUser).options(selectinload(PortalUser.employments)).where(PortalUser.id == int(user_id)))
+        .scalars()
+        .first()
+    )
     if user is None:
-        raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
+        raise HTTPException(status_code=404, detail="Uzivatel nenalezen.")
     _apply_password(db, user, payload.password)
     db.add(user)
     db.commit()
@@ -360,9 +402,11 @@ def delete_user(
 ):
     user = db.get(PortalUser, int(user_id))
     if user is None:
-        raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
+        raise HTTPException(status_code=404, detail="Uzivatel nenalezen.")
 
     instance_id = user.instance_id
+    clear_user_lockout(db, actor_type="portal", principal=user.email.lower())
+    revoke_unlock_tokens(db, actor_type="portal", principal=user.email.lower())
     db.delete(user)
 
     if instance_id:
@@ -370,17 +414,10 @@ def delete_user(
             select(PortalUser).where(PortalUser.instance_id == instance_id).where(PortalUser.id != user.id)
         ).scalars().first()
         if other_links is None:
-            db.execute(delete(Attendance).where(Attendance.instance_id == instance_id))
-            db.execute(delete(AttendanceLock).where(AttendanceLock.instance_id == instance_id))
-            db.execute(delete(ShiftPlan).where(ShiftPlan.instance_id == instance_id))
-            db.execute(delete(ShiftPlanMonthInstance).where(ShiftPlanMonthInstance.instance_id == instance_id))
-            db.execute(delete(AttendanceReminderEvent).where(AttendanceReminderEvent.instance_id == instance_id))
             inst = db.get(Instance, instance_id)
             if inst is not None:
                 db.delete(inst)
 
-    clear_user_lockout(db, actor_type="portal", principal=user.email.lower())
-    revoke_unlock_tokens(db, actor_type="portal", principal=user.email.lower())
     db.commit()
     return OkOut(ok=True)
 
@@ -395,7 +432,7 @@ def send_reset_link(
 ):
     user = db.get(PortalUser, int(user_id))
     if not user or not user.is_active:
-        raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
+        raise HTTPException(status_code=404, detail="Uzivatel nenalezen.")
 
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
@@ -410,7 +447,7 @@ def send_reset_link(
     try:
         _send_reset_email(settings=settings, cfg=cfg, to_email=user.email, reset_url=reset_url)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Odeslání selhalo: {exc}") from exc
+        raise HTTPException(status_code=400, detail=f"Odeslani selhalo: {exc}") from exc
 
     return OkOut(ok=True)
 
@@ -430,3 +467,13 @@ def unlock_user(
     revoke_unlock_tokens(db, actor_type="portal", principal=user.email.lower())
     db.commit()
     return OkOut(ok=True)
+
+
+@router.get("/{user_id}/employments", response_model=list[EmploymentOut])
+def list_user_employments(user_id: int, _admin=Depends(require_admin), db: Session = Depends(get_db)):
+    rows = (
+        db.execute(select(Employment).where(Employment.user_id == user_id).order_by(Employment.start_date.asc(), Employment.id.asc()))
+        .scalars()
+        .all()
+    )
+    return [_to_employment_out(row) for row in rows]

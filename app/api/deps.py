@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import models
@@ -15,6 +16,12 @@ from app.security.tokens import verify_instance_token
 @dataclass(frozen=True)
 class InstanceAuth:
     instance: models.Instance
+
+
+@dataclass(frozen=True)
+class PortalUserAuth:
+    instance: models.Instance
+    user: models.PortalUser
 
 
 def _bearer_from_auth_header(authorization: str | None) -> str | None:
@@ -71,6 +78,22 @@ def require_instance(
 ) -> models.Instance:
     """Backward-compatible alias returning the Instance directly."""
     return require_instance_auth(request=request, db=db, authorization=authorization).instance
+
+
+def require_portal_user_auth(
+    request: Request,
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None),
+) -> PortalUserAuth:
+    auth = require_instance_auth(request=request, db=db, authorization=authorization)
+    user = (
+        db.execute(select(models.PortalUser).where(models.PortalUser.instance_id == auth.instance.id))
+        .scalars()
+        .first()
+    )
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="K tokenu neni prirazen uzivatel")
+    return PortalUserAuth(instance=auth.instance, user=user)
 
 
 def require_instance_by_id(

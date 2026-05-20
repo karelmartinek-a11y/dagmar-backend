@@ -9,27 +9,26 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import distinct, or_, select
+from sqlalchemy.orm import Session, joinedload
 
-from ...db.models import Attendance, Instance
+from ...db.models import Attendance, Employment
 from ...db.session import get_db
 from ...utils.slugify import filename_safe
-from ..deps import require_admin, resolve_profile_instance
+from ..deps import require_admin
 
 router = APIRouter(tags=["admin"])
 
 
 def _month_range(month_yyyy_mm: str) -> tuple[date, date]:
-    """Return [start, end) date range for given YYYY-MM."""
     try:
         y_str, m_str = month_yyyy_mm.split("-", 1)
         y = int(y_str)
         m = int(m_str)
         if not (1 <= m <= 12):
             raise ValueError
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail="Invalid month. Expected YYYY-MM") from e
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid month. Expected YYYY-MM") from exc
 
     start = date(y, m, 1)
     if m == 12:
@@ -39,24 +38,22 @@ def _month_range(month_yyyy_mm: str) -> tuple[date, date]:
     return start, end
 
 
-def _csv_for_instance(
+def _employment_display_name(employment: Employment) -> str:
+    user_name = employment.user.name if employment.user else f"Uzivatel {employment.user_id}"
+    type_label = "HPP" if employment.employment_type == "HPP" else "DPP_DPC"
+    return f"{user_name} - {type_label} - {employment.title}"
+
+
+def _csv_for_employment(
     *,
     db: Session,
-    instance: Instance,
+    employment: Employment,
     start: date,
     end: date,
 ) -> bytes:
-    """Generate CSV bytes for one instance in month range.
-
-    CSV format:
-      datum,prichod,odchod
-      YYYY-MM-DD,HH:MM,HH:MM
-
-    arrival/departure can be blank.
-    """
     q = (
         select(Attendance)
-        .where(Attendance.instance_id == instance.id)
+        .where(Attendance.employment_id == employment.id)
         .where(Attendance.date >= start)
         .where(Attendance.date < end)
         .order_by(Attendance.date.asc())
@@ -65,13 +62,17 @@ def _csv_for_instance(
 
     buf = io.StringIO(newline="")
     w = csv.writer(buf, delimiter=",", quoting=csv.QUOTE_MINIMAL)
-    w.writerow(["datum", "prichod", "odchod"])
-    for r in rows:
+    w.writerow(["zamestnanec", "uvazek", "typ_uvazku", "datum", "prichod", "odchod"])
+    user_name = employment.user.name if employment.user else f"Uzivatel {employment.user_id}"
+    for row in rows:
         w.writerow(
             [
-                r.date.isoformat(),
-                r.arrival_time or "",
-                r.departure_time or "",
+                user_name,
+                employment.title,
+                employment.employment_type,
+                row.date.isoformat(),
+                row.arrival_time or "",
+                row.departure_time or "",
             ]
         )
 
@@ -83,44 +84,72 @@ def _iter_bytes(data: bytes, chunk_size: int = 64 * 1024) -> Iterable[bytes]:
         yield data[i : i + chunk_size]
 
 
+def _load_relevant_employments(db: Session, start: date, end: date) -> list[Employment]:
+    candidates = (
+        db.execute(
+            select(Employment)
+            .options(joinedload(Employment.user))
+            .where(
+                or_(
+                    Employment.end_date.is_(None),
+                    Employment.end_date >= start,
+                )
+            )
+            .where(Employment.start_date < end)
+            .order_by(Employment.start_date.asc(), Employment.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    attendance_ids = db.execute(
+        select(distinct(Attendance.employment_id)).where(Attendance.date >= start, Attendance.date < end)
+    ).scalars().all()
+    attendance_id_set = set(attendance_ids)
+    relevant = [employment for employment in candidates if employment.is_active or employment.id in attendance_id_set]
+    seen = {employment.id for employment in relevant}
+    if attendance_id_set - seen:
+        extra = (
+            db.execute(
+                select(Employment)
+                .options(joinedload(Employment.user))
+                .where(Employment.id.in_(attendance_id_set - seen))
+            )
+            .scalars()
+            .all()
+        )
+        relevant.extend(extra)
+    relevant.sort(key=lambda item: (item.user.name if item.user else "", item.start_date, item.id))
+    return relevant
+
+
 @router.get("/api/v1/admin/export")
 def export_csv_or_zip(
     month: str = Query(..., description="YYYY-MM"),
-    instance_id: str | None = Query(None),
+    employment_id: int | None = Query(None),
     bulk: bool | None = Query(False),
     _admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Export attendance.
-
-    - Individual: /api/v1/admin/export?month=YYYY-MM&instance_id=...
-      -> returns CSV download
-
-    - Bulk: /api/v1/admin/export?month=YYYY-MM&bulk=true
-      -> returns ZIP with multiple CSV
-
-    Naming:
-      {nazev_instance}_{YYYY-MM}.csv (no diacritics, spaces -> _)
-    """
-
     start, end = _month_range(month)
 
-    if bulk and instance_id:
-        raise HTTPException(status_code=400, detail="Use either bulk=true or instance_id, not both")
+    if bulk and employment_id:
+        raise HTTPException(status_code=400, detail="Use either bulk=true or employment_id, not both")
 
     if not bulk:
-        if not instance_id:
-            raise HTTPException(status_code=400, detail="instance_id is required unless bulk=true")
+        if not employment_id:
+            raise HTTPException(status_code=400, detail="employment_id is required unless bulk=true")
 
-        instance = db.get(Instance, instance_id)
-        if not instance:
-            raise HTTPException(status_code=404, detail="Instance not found")
+        employment = (
+            db.execute(select(Employment).options(joinedload(Employment.user)).where(Employment.id == employment_id))
+            .scalars()
+            .first()
+        )
+        if not employment:
+            raise HTTPException(status_code=404, detail="Employment not found")
 
-        profile = resolve_profile_instance(db, instance)
-
-        display = profile.display_name or f"instance_{profile.id}"
+        display = _employment_display_name(employment)
         fname = f"{filename_safe(display)}_{month}.csv"
-        content = _csv_for_instance(db=db, instance=profile, start=start, end=end)
+        content = _csv_for_employment(db=db, employment=employment, start=start, end=end)
 
         return StreamingResponse(
             _iter_bytes(content),
@@ -128,24 +157,14 @@ def export_csv_or_zip(
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
-    # bulk=true
-    instances = db.execute(select(Instance).order_by(Instance.created_at.asc())).scalars().all()
-    profiles = []
-    seen = set()
-    for inst in instances:
-        profile = resolve_profile_instance(db, inst)
-        if profile.id in seen:
-            continue
-        seen.add(profile.id)
-        profiles.append(profile)
-    instances = profiles
+    employments = _load_relevant_employments(db, start, end)
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-        for inst in instances:
-            display = inst.display_name or f"instance_{inst.id}"
+        for employment in employments:
+            display = _employment_display_name(employment)
             fname = f"{filename_safe(display)}_{month}.csv"
-            csv_bytes = _csv_for_instance(db=db, instance=inst, start=start, end=end)
+            csv_bytes = _csv_for_employment(db=db, employment=employment, start=start, end=end)
             z.writestr(fname, csv_bytes)
 
     zip_bytes = zip_buf.getvalue()

@@ -9,21 +9,27 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import require_admin, resolve_profile_instance
-from app.db.models import Instance, InstanceStatus, ShiftPlan, ShiftPlanMonthInstance
+from app.api.deps import require_admin
+from app.db.models import Employment, ShiftPlan, ShiftPlanMonthInstance
 from app.db.session import get_db
 from app.security.csrf import require_csrf
+from app.services.employment_access import employment_label, employment_overlaps_month
 from app.utils.timeparse import parse_hhmm_or_none, parse_yyyy_mm_dd
 
 router = APIRouter(tags=["admin"])
 
 
-class ActiveInstanceOut(BaseModel):
-    id: str
-    display_name: str | None = None
-    employment_template: str
+class ActiveEmploymentOut(BaseModel):
+    id: int
+    user_id: int
+    user_name: str
+    title: str
+    employment_type: str
+    display_label: str
+    start_date: str
+    end_date: str | None = None
 
 
 class ShiftPlanDayOut(BaseModel):
@@ -31,31 +37,34 @@ class ShiftPlanDayOut(BaseModel):
     arrival_time: str | None = None
     departure_time: str | None = None
     status: str | None = None
+    is_within_employment_period: bool
 
 
 class ShiftPlanRowOut(BaseModel):
-    instance_id: str
-    display_name: str | None = None
-    employment_template: str
+    employment_id: int
+    user_name: str
+    title: str
+    employment_type: str
+    display_label: str
     days: list[ShiftPlanDayOut]
 
 
 class ShiftPlanMonthOut(BaseModel):
     year: int
     month: int
-    selected_instance_ids: list[str] = []
-    active_instances: list[ActiveInstanceOut] = []
+    selected_employment_ids: list[int] = []
+    available_employments: list[ActiveEmploymentOut] = []
     rows: list[ShiftPlanRowOut] = []
 
 
 class ShiftPlanSelectionIn(BaseModel):
     year: int = Field(..., ge=2000, le=2100)
     month: int = Field(..., ge=1, le=12)
-    instance_ids: list[str] = Field(default_factory=list)
+    employment_ids: list[int] = Field(default_factory=list)
 
 
 class ShiftPlanUpsertIn(BaseModel):
-    instance_id: str = Field(..., min_length=1)
+    employment_id: int = Field(..., ge=1)
     date: str = Field(..., description="YYYY-MM-DD")
     arrival_time: str | None = Field(None, description="HH:MM or null")
     departure_time: str | None = Field(None, description="HH:MM or null")
@@ -66,18 +75,6 @@ class ShiftPlanUpsertIn(BaseModel):
 
 class OkOut(BaseModel):
     ok: bool = True
-
-
-def _dedupe_profile_instances(db: Session, instances: Sequence[Instance]) -> list[Instance]:
-    seen: set[str] = set()
-    result: list[Instance] = []
-    for inst in instances:
-        profile = resolve_profile_instance(db, inst)
-        if profile.id in seen:
-            continue
-        seen.add(profile.id)
-        result.append(profile)
-    return result
 
 
 def _month_range(year: int, month: int) -> tuple[dt.date, dt.date]:
@@ -91,6 +88,41 @@ def _month_range(year: int, month: int) -> tuple[dt.date, dt.date]:
     return start, end
 
 
+def _to_active_employment_out(employment: Employment) -> ActiveEmploymentOut:
+    user_name = employment.user.name if employment.user else f"Uživatel {employment.user_id}"
+    return ActiveEmploymentOut(
+        id=employment.id,
+        user_id=employment.user_id,
+        user_name=user_name,
+        title=employment.title,
+        employment_type=employment.employment_type,
+        display_label=employment_label(employment, user_name),
+        start_date=employment.start_date.isoformat(),
+        end_date=employment.end_date.isoformat() if employment.end_date is not None else None,
+    )
+
+
+def _get_employment(employment_id: int, db: Session) -> Employment:
+    employment = (
+        db.execute(select(Employment).options(joinedload(Employment.user)).where(Employment.id == employment_id))
+        .scalars()
+        .first()
+    )
+    if employment is None:
+        raise HTTPException(status_code=404, detail="Uvazek nenalezen.")
+    return employment
+
+
+def _load_available_employments(db: Session, year: int, month: int) -> list[Employment]:
+    month_start, month_end = _month_range(year, month)
+    rows = (
+        db.execute(select(Employment).options(joinedload(Employment.user)).order_by(Employment.start_date.asc(), Employment.id.asc()))
+        .scalars()
+        .all()
+    )
+    return [row for row in rows if employment_overlaps_month(row, month_start, month_end)]
+
+
 @router.get("/api/v1/admin/shift-plan", response_model=ShiftPlanMonthOut)
 def admin_get_shift_plan_month(
     year: int = Query(..., ge=2000, le=2100),
@@ -98,45 +130,17 @@ def admin_get_shift_plan_month(
     _admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> ShiftPlanMonthOut:
-    # Aktivní instance chceme vrátit i tehdy, když tabulky plánů chybí (aby UI mělo aspoň seznam).
     try:
-        active_instances = db.execute(
-            select(Instance)
-            .where(Instance.status == InstanceStatus.ACTIVE)
-            .order_by(Instance.display_name.asc(), Instance.created_at.asc())
-        ).scalars().all()
-        active_instances = _dedupe_profile_instances(db, active_instances)
-    except SQLAlchemyError as e:
-        logging.getLogger(__name__).warning("Instance query failed: %s", e)
-        active_instances = []
-
-    try:
-        return _admin_get_shift_plan_month_impl(db=db, year=year, month=month, active_instances=active_instances)
-    except SQLAlchemyError as e:
-        logging.getLogger(__name__).warning("Shift plan tables unavailable: %s", e)
-        active_out = [
-            ActiveInstanceOut(id=i.id, display_name=i.display_name, employment_template=i.employment_template) for i in active_instances
-        ]
-        return ShiftPlanMonthOut(year=year, month=month, selected_instance_ids=[], active_instances=active_out, rows=[])
+        return _admin_get_shift_plan_month_impl(db=db, year=year, month=month)
+    except SQLAlchemyError as exc:
+        logging.getLogger(__name__).warning("Shift plan tables unavailable: %s", exc)
+        return ShiftPlanMonthOut(year=year, month=month, selected_employment_ids=[], available_employments=[], rows=[])
 
 
-# TODO(PULS-009): Runtime DDL has been removed from request flow.
-# Shift-plan tables/types must be provisioned via Alembic migrations before runtime.
-
-def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int, active_instances=None) -> ShiftPlanMonthOut:
+def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int) -> ShiftPlanMonthOut:
     start, end = _month_range(year, month)
-
-    if active_instances is None:
-        active_instances = db.execute(
-            select(Instance)
-            .where(Instance.status == InstanceStatus.ACTIVE)
-            .order_by(Instance.display_name.asc(), Instance.created_at.asc())
-        ).scalars().all()
-        active_instances = _dedupe_profile_instances(db, active_instances)
-
-    active_out = [
-        ActiveInstanceOut(id=i.id, display_name=i.display_name, employment_template=i.employment_template) for i in active_instances
-    ]
+    available_employments = _load_available_employments(db, year, month)
+    available_out = [_to_active_employment_out(item) for item in available_employments]
 
     selected = db.execute(
         select(ShiftPlanMonthInstance)
@@ -144,61 +148,64 @@ def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int, acti
         .where(ShiftPlanMonthInstance.month == month)
         .order_by(ShiftPlanMonthInstance.id.asc())
     ).scalars().all()
-    selected_ids: list[str] = []
-    selected_seen: set[str] = set()
-    for s in selected:
-        inst = db.get(Instance, s.instance_id)
-        if not inst:
-            continue
-        profile = resolve_profile_instance(db, inst)
-        if profile.id in selected_seen:
-            continue
-        selected_seen.add(profile.id)
-        selected_ids.append(profile.id)
-
+    selected_ids = [row.employment_id for row in selected]
     if not selected_ids:
-        return ShiftPlanMonthOut(year=year, month=month, selected_instance_ids=[], active_instances=active_out, rows=[])
+        return ShiftPlanMonthOut(year=year, month=month, selected_employment_ids=[], available_employments=available_out, rows=[])
 
-    insts = db.execute(select(Instance).where(Instance.id.in_(selected_ids))).scalars().all()
-    inst_by_id = {i.id: i for i in insts}
+    employments = (
+        db.execute(select(Employment).options(joinedload(Employment.user)).where(Employment.id.in_(selected_ids)))
+        .scalars()
+        .all()
+    )
+    employment_by_id = {item.id: item for item in employments}
 
     plan_rows = db.execute(
         select(ShiftPlan)
-        .where(ShiftPlan.instance_id.in_(selected_ids))
+        .where(ShiftPlan.employment_id.in_(selected_ids))
         .where(ShiftPlan.date >= start)
         .where(ShiftPlan.date < end)
         .order_by(ShiftPlan.date.asc())
     ).scalars().all()
-    plan_map: dict[tuple[str, dt.date], ShiftPlan] = {(p.instance_id, p.date): p for p in plan_rows}
+    plan_map: dict[tuple[int, dt.date], ShiftPlan] = {(row.employment_id, row.date): row for row in plan_rows}
 
     rows: list[ShiftPlanRowOut] = []
-    for iid in selected_ids:
-        inst = inst_by_id.get(iid)
-        if not inst:
+    for employment_id in selected_ids:
+        employment = employment_by_id.get(employment_id)
+        if employment is None:
             continue
         cur = start
         days: list[ShiftPlanDayOut] = []
         while cur < end:
-            p = plan_map.get((iid, cur))
+            row = plan_map.get((employment_id, cur))
             days.append(
                 ShiftPlanDayOut(
                     date=cur.isoformat(),
-                    arrival_time=p.arrival_time if p else None,
-                    departure_time=p.departure_time if p else None,
-                    status=p.status if p else None,
+                    arrival_time=row.arrival_time if row else None,
+                    departure_time=row.departure_time if row else None,
+                    status=row.status if row else None,
+                    is_within_employment_period=employment.start_date <= cur and (employment.end_date is None or cur <= employment.end_date),
                 )
             )
             cur = cur + dt.timedelta(days=1)
+        user_name = employment.user.name if employment.user else f"Uživatel {employment.user_id}"
         rows.append(
             ShiftPlanRowOut(
-                instance_id=iid,
-                display_name=inst.display_name,
-                employment_template=inst.employment_template,
+                employment_id=employment.id,
+                user_name=user_name,
+                title=employment.title,
+                employment_type=employment.employment_type,
+                display_label=employment_label(employment, user_name),
                 days=days,
             )
         )
 
-    return ShiftPlanMonthOut(year=year, month=month, selected_instance_ids=selected_ids, active_instances=active_out, rows=rows)
+    return ShiftPlanMonthOut(
+        year=year,
+        month=month,
+        selected_employment_ids=selected_ids,
+        available_employments=available_out,
+        rows=rows,
+    )
 
 
 @router.put("/api/v1/admin/shift-plan", response_model=OkOut)
@@ -210,42 +217,40 @@ def admin_upsert_shift_plan(
 ) -> OkOut:
     try:
         return _admin_upsert_shift_plan_impl(db=db, body=body)
-    except SQLAlchemyError as e:
-        logging.getLogger(__name__).warning("Shift plan write failed: %s", e)
-        raise HTTPException(status_code=500, detail="Shift plan storage is not available") from e
+    except SQLAlchemyError as exc:
+        logging.getLogger(__name__).warning("Shift plan write failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Shift plan storage is not available") from exc
 
 
 def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut:
-    inst = db.get(Instance, body.instance_id)
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instance not found")
-    profile = resolve_profile_instance(db, inst)
+    employment = _get_employment(body.employment_id, db)
 
     try:
         day = parse_yyyy_mm_dd(body.date)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if day < employment.start_date or (employment.end_date is not None and day > employment.end_date):
+        raise HTTPException(status_code=409, detail="Datum nelezi v obdobi platnosti vybraneho uvazku.")
 
     try:
         arrival = parse_hhmm_or_none(body.arrival_time)
         departure = parse_hhmm_or_none(body.departure_time)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if body.status not in (None, "HOLIDAY", "OFF"):
         raise HTTPException(status_code=400, detail="Invalid status, expected HOLIDAY or OFF or null")
     if body.status is not None:
-        # Blokovaný den nemá mít konkrétní časy.
         arrival = None
         departure = None
 
     existing = db.execute(
         select(ShiftPlan).where(
-            ShiftPlan.instance_id == profile.id,
+            ShiftPlan.employment_id == employment.id,
             ShiftPlan.date == day,
         )
     ).scalar_one_or_none()
 
-    # Remove empty row to keep "existence" semantics simple.
     if arrival is None and departure is None and body.status is None:
         if existing is not None:
             db.delete(existing)
@@ -254,7 +259,12 @@ def _admin_upsert_shift_plan_impl(db: Session, body: ShiftPlanUpsertIn) -> OkOut
 
     if existing is None:
         existing = ShiftPlan(
-            instance_id=profile.id, date=day, arrival_time=arrival, departure_time=departure, status=body.status
+            employment_id=employment.id,
+            instance_id=employment.user.instance_id if employment.user else None,
+            date=day,
+            arrival_time=arrival,
+            departure_time=departure,
+            status=body.status,
         )
         db.add(existing)
     else:
@@ -275,44 +285,23 @@ def admin_set_shift_plan_selection(
 ) -> OkOut:
     try:
         return _admin_set_shift_plan_selection_impl(db=db, body=body)
-    except SQLAlchemyError as e:
-        logging.getLogger(__name__).warning("Shift plan selection write failed: %s", e)
-        raise HTTPException(status_code=500, detail="Shift plan storage is not available") from e
+    except SQLAlchemyError as exc:
+        logging.getLogger(__name__).warning("Shift plan selection write failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Shift plan storage is not available") from exc
 
 
 def _admin_set_shift_plan_selection_impl(db: Session, body: ShiftPlanSelectionIn) -> OkOut:
-    # Keep order, map na profil, remove duplicates & empties.
-    uniq: list[str] = []
-    seen: set[str] = set()
-    missing: list[str] = []
-    for iid in body.instance_ids:
-        if not iid:
+    uniq: list[int] = []
+    seen: set[int] = set()
+    for employment_id in body.employment_ids:
+        if employment_id in seen:
             continue
-        inst = db.get(Instance, iid)
-        if not inst:
-            missing.append(iid)
-            continue
-        profile = resolve_profile_instance(db, inst)
-        pid = profile.id
-        if pid in seen:
-            continue
-        seen.add(pid)
-        uniq.append(pid)
-
-    if missing:
-        raise HTTPException(status_code=400, detail="Some instances were not found")
-
-    if uniq:
-        active_ids = set(
-            db.execute(
-                select(Instance.id)
-                .where(Instance.status == InstanceStatus.ACTIVE)
-                .where(Instance.id.in_(uniq))
-            ).scalars().all()
-        )
-        missing_active = [iid for iid in uniq if iid not in active_ids]
-        if missing_active:
-            raise HTTPException(status_code=400, detail="Some instances are not ACTIVE or were not found")
+        employment = _get_employment(employment_id, db)
+        month_start, month_end = _month_range(body.year, body.month)
+        if not employment_overlaps_month(employment, month_start, month_end):
+            raise HTTPException(status_code=400, detail="Nektery uvazek nelezi ve zvolenem mesici.")
+        seen.add(employment_id)
+        uniq.append(employment_id)
 
     db.execute(
         delete(ShiftPlanMonthInstance).where(
@@ -320,7 +309,7 @@ def _admin_set_shift_plan_selection_impl(db: Session, body: ShiftPlanSelectionIn
             ShiftPlanMonthInstance.month == body.month,
         )
     )
-    for iid in uniq:
-        db.add(ShiftPlanMonthInstance(year=body.year, month=body.month, instance_id=iid))
+    for employment_id in uniq:
+        db.add(ShiftPlanMonthInstance(year=body.year, month=body.month, employment_id=employment_id))
     db.commit()
     return OkOut(ok=True)

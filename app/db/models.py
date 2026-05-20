@@ -66,9 +66,6 @@ class Instance(Base):
         remote_side=[id],
         foreign_keys=[profile_instance_id],
     )
-    shift_plans = relationship("ShiftPlan", back_populates="instance", cascade="all, delete-orphan")
-    shift_plan_month_instances = relationship("ShiftPlanMonthInstance", back_populates="instance", cascade="all, delete-orphan")
-
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -85,18 +82,47 @@ class Instance(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    attendances: Mapped[list[Attendance]] = relationship(
-        back_populates="instance", cascade="all, delete-orphan", passive_deletes=True
-    )
-    attendance_locks: Mapped[list[AttendanceLock]] = relationship(
-        back_populates="instance", cascade="all, delete-orphan", passive_deletes=True
-    )
-
     __table_args__ = (
         Index("ix_instances_status", "status"),
         Index("ix_instances_last_seen_at", "last_seen_at"),
         Index("ix_instances_profile_instance_id", "profile_instance_id"),
+    )
+
+
+class Employment(Base):
+    __tablename__ = "employments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("portal_users.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    employment_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[PortalUser] = relationship("PortalUser", back_populates="employments")
+    attendances: Mapped[list[Attendance]] = relationship(
+        "Attendance", back_populates="employment", cascade="all, delete-orphan", passive_deletes=True
+    )
+    shift_plans: Mapped[list[ShiftPlan]] = relationship(
+        "ShiftPlan", back_populates="employment", cascade="all, delete-orphan", passive_deletes=True
+    )
+    attendance_locks: Mapped[list[AttendanceLock]] = relationship(
+        "AttendanceLock", back_populates="employment", cascade="all, delete-orphan", passive_deletes=True
+    )
+    shift_plan_month_employments: Mapped[list[ShiftPlanMonthInstance]] = relationship(
+        "ShiftPlanMonthInstance", back_populates="employment", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    __table_args__ = (
+        Index("ix_employments_user_id", "user_id"),
+        Index("ix_employments_start_date", "start_date"),
+        Index("ix_employments_end_date", "end_date"),
+        Index("ix_employments_is_active", "is_active"),
     )
 
 
@@ -105,8 +131,11 @@ class Attendance(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    instance_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False
+    employment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("employments.id", ondelete="CASCADE"), nullable=False
+    )
+    instance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
 
@@ -119,10 +148,12 @@ class Attendance(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    instance: Mapped[Instance] = relationship(back_populates="attendances")
+    employment: Mapped[Employment] = relationship(back_populates="attendances")
+    instance: Mapped[Instance | None] = relationship()
 
     __table_args__ = (
-        UniqueConstraint("instance_id", "date", name="uq_attendance_instance_date"),
+        UniqueConstraint("employment_id", "date", name="uq_attendance_employment_date"),
+        Index("ix_attendance_employment_date", "employment_id", "date"),
         Index("ix_attendance_instance_date", "instance_id", "date"),
     )
 
@@ -131,8 +162,11 @@ class ShiftPlan(Base):
     __tablename__ = "shift_plan"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    instance_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False
+    employment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("employments.id", ondelete="CASCADE"), nullable=False
+    )
+    instance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
     arrival_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
@@ -141,10 +175,12 @@ class ShiftPlan(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, onupdate=func.now())
 
-    instance: Mapped[Instance] = relationship("Instance", back_populates="shift_plans")
+    employment: Mapped[Employment] = relationship("Employment", back_populates="shift_plans")
+    instance: Mapped[Instance | None] = relationship("Instance")
 
     __table_args__ = (
-        UniqueConstraint("instance_id", "date", name="uq_shift_plan_instance_date"),
+        UniqueConstraint("employment_id", "date", name="uq_shift_plan_employment_date"),
+        Index("ix_shift_plan_employment_id", "employment_id"),
         Index("ix_shift_plan_instance_id", "instance_id"),
         Index("ix_shift_plan_date", "date"),
     )
@@ -156,17 +192,22 @@ class ShiftPlanMonthInstance(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
-    instance_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False
+    employment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("employments.id", ondelete="CASCADE"), nullable=False
+    )
+    instance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    instance: Mapped[Instance] = relationship("Instance", back_populates="shift_plan_month_instances")
+    employment: Mapped[Employment] = relationship("Employment", back_populates="shift_plan_month_employments")
+    instance: Mapped[Instance | None] = relationship("Instance")
 
     __table_args__ = (
-        UniqueConstraint("year", "month", "instance_id", name="uq_shift_plan_month_instance"),
+        UniqueConstraint("year", "month", "employment_id", name="uq_shift_plan_month_employment"),
         Index("ix_shift_plan_month_instances_year", "year"),
         Index("ix_shift_plan_month_instances_month", "month"),
+        Index("ix_shift_plan_month_instances_employment_id", "employment_id"),
         Index("ix_shift_plan_month_instances_instance_id", "instance_id"),
     )
 
@@ -175,8 +216,11 @@ class AttendanceLock(Base):
     __tablename__ = "attendance_locks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    instance_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False
+    employment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("employments.id", ondelete="CASCADE"), nullable=False
+    )
+    instance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
     )
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -185,10 +229,12 @@ class AttendanceLock(Base):
     )
     locked_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    instance: Mapped[Instance] = relationship(back_populates="attendance_locks")
+    employment: Mapped[Employment] = relationship(back_populates="attendance_locks")
+    instance: Mapped[Instance | None] = relationship()
 
     __table_args__ = (
-        UniqueConstraint("instance_id", "year", "month", name="uq_attendance_lock_instance_month"),
+        UniqueConstraint("employment_id", "year", "month", name="uq_attendance_lock_employment_month"),
+        Index("ix_attendance_locks_employment_month", "employment_id", "year", "month"),
         Index("ix_attendance_locks_instance_month", "instance_id", "year", "month"),
     )
 
@@ -236,6 +282,9 @@ class PortalUser(Base):
 
     reset_tokens: Mapped[list[PortalUserResetToken]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    employments: Mapped[list[Employment]] = relationship(
+        "Employment", back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -286,8 +335,11 @@ class AttendanceReminderEvent(Base):
     __tablename__ = "attendance_reminder_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    instance_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("instances.id", ondelete="CASCADE"), nullable=False
+    employment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("employments.id", ondelete="CASCADE"), nullable=False
+    )
+    instance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("instances.id", ondelete="SET NULL"), nullable=True
     )
     attendance_date: Mapped[date] = mapped_column(Date, nullable=False)
     reminder_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -298,12 +350,13 @@ class AttendanceReminderEvent(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "instance_id",
+            "employment_id",
             "attendance_date",
             "reminder_type",
             "sequence_no",
             name="uq_attendance_reminder_event_unique",
         ),
+        Index("ix_attendance_reminder_events_employment_date", "employment_id", "attendance_date"),
         Index("ix_attendance_reminder_events_instance_date", "instance_id", "attendance_date"),
     )
 

@@ -10,9 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_instance, resolve_profile_instance
-from app.db.models import Attendance, Instance, ShiftPlan
+from app.api.deps import PortalUserAuth, require_portal_user_auth
+from app.db.models import Attendance, Employment, ShiftPlan
 from app.db.session import get_db
+from app.services.employment_access import employment_is_valid_on_day, employment_label
 from app.services.prague_time import prague_minutes_since_midnight, prague_today
 from app.utils.timeparse import parse_hhmm_or_none
 
@@ -26,14 +27,17 @@ class AttendanceDayOut(BaseModel):
     planned_arrival_time: str | None = None
     planned_departure_time: str | None = None
     planned_status: str | None = None
+    is_within_employment_period: bool
 
 
 class AttendanceMonthOut(BaseModel):
+    employment_id: int
+    employment_label: str
     days: list[AttendanceDayOut]
-    instance_display_name: str
 
 
 class AttendanceUpsertIn(BaseModel):
+    employment_id: int
     date: str = Field(..., description="YYYY-MM-DD")
     arrival_time: str | None = Field(None, description="HH:MM or null")
     departure_time: str | None = Field(None, description="HH:MM or null")
@@ -61,6 +65,25 @@ def _minutes_from_hhmm(value: str | None) -> int | None:
     return int(hour) * 60 + int(minute)
 
 
+def _require_accessible_employment(
+    employment_id: int,
+    auth: PortalUserAuth,
+    db: Session,
+) -> Employment:
+    employment = db.get(Employment, employment_id)
+    if employment is None or employment.user_id != auth.user.id:
+        raise HTTPException(status_code=404, detail="Uvazek nenalezen.")
+    return employment
+
+
+def _ensure_day_in_employment_period(employment: Employment, day: dt.date) -> None:
+    if day < employment.start_date or (employment.end_date is not None and day > employment.end_date):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Zvolene datum nelezi v obdobi platnosti vybraneho uvazku.",
+        )
+
+
 def _enforce_user_forensic_rules(
     *,
     day: dt.date,
@@ -70,7 +93,7 @@ def _enforce_user_forensic_rules(
 ) -> None:
     today = prague_today()
     if day > today:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Budoucí průchod uživatel nesmí zadat.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Budouci pruchod uzivatel nesmi zadat.")
 
     if day == today:
         now_minutes = prague_minutes_since_midnight()
@@ -79,7 +102,7 @@ def _enforce_user_forensic_rules(
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="U dnešního dne nelze zadat čas v budoucnosti podle času v Praze.",
+                detail="U dnesniho dne nelze zadat cas v budoucnosti podle casu v Praze.",
             )
         return
 
@@ -89,28 +112,29 @@ def _enforce_user_forensic_rules(
     if existing.arrival_time is not None and arrival != existing.arrival_time:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Na minulých dnech lze doplnit jen chybějící příchod nebo odchod. Uložené hodnoty už měnit nejdou.",
+            detail="Na minulych dnech lze doplnit jen chybejici prichod nebo odchod. Ulozene hodnoty uz menit nejdou.",
         )
     if existing.departure_time is not None and departure != existing.departure_time:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Na minulých dnech lze doplnit jen chybějící příchod nebo odchod. Uložené hodnoty už měnit nejdou.",
+            detail="Na minulych dnech lze doplnit jen chybejici prichod nebo odchod. Ulozene hodnoty uz menit nejdou.",
         )
 
 
 @router.get("/api/v1/attendance", response_model=AttendanceMonthOut)
 def get_month_attendance(
+    employment_id: int = Query(..., ge=1),
     year: int = Query(..., ge=2000, le=2100),
     month: int = Query(..., ge=1, le=12),
     db: Session = Depends(get_db),
-    inst: Instance = Depends(require_instance),
+    auth: PortalUserAuth = Depends(require_portal_user_auth),
 ) -> AttendanceMonthOut:
     start, end = _month_range(year, month)
-    profile = resolve_profile_instance(db, inst)
+    employment = _require_accessible_employment(employment_id, auth, db)
 
     rows = db.execute(
         select(Attendance)
-        .where(Attendance.instance_id == profile.id)
+        .where(Attendance.employment_id == employment.id)
         .where(Attendance.date >= start)
         .where(Attendance.date < end)
         .order_by(Attendance.date.asc())
@@ -122,7 +146,7 @@ def get_month_attendance(
     try:
         plan_rows = db.execute(
             select(ShiftPlan)
-            .where(ShiftPlan.instance_id == profile.id)
+            .where(ShiftPlan.employment_id == employment.id)
             .where(ShiftPlan.date >= start)
             .where(ShiftPlan.date < end)
         ).scalars().all()
@@ -143,19 +167,23 @@ def get_month_attendance(
                 planned_arrival_time=plan.arrival_time if plan else None,
                 planned_departure_time=plan.departure_time if plan else None,
                 planned_status=plan.status if plan else None,
+                is_within_employment_period=employment.start_date <= cur and (employment.end_date is None or cur <= employment.end_date),
             )
         )
         cur = cur + dt.timedelta(days=1)
 
-    display_name = profile.display_name or f"Zařízení {profile.id[:8]}"
-    return AttendanceMonthOut(days=days, instance_display_name=display_name)
+    return AttendanceMonthOut(
+        employment_id=employment.id,
+        employment_label=employment_label(employment, auth.user.name),
+        days=days,
+    )
 
 
 @router.put("/api/v1/attendance", response_model=OkOut)
 def upsert_attendance(
     body: AttendanceUpsertIn,
     db: Session = Depends(get_db),
-    inst: Instance = Depends(require_instance),
+    auth: PortalUserAuth = Depends(require_portal_user_auth),
 ) -> OkOut:
     try:
         day = dt.date.fromisoformat(body.date)
@@ -165,7 +193,8 @@ def upsert_attendance(
             detail="Invalid date format, expected YYYY-MM-DD",
         ) from exc
 
-    profile = resolve_profile_instance(db, inst)
+    employment = _require_accessible_employment(body.employment_id, auth, db)
+    _ensure_day_in_employment_period(employment, day)
 
     try:
         arrival = parse_hhmm_or_none(body.arrival_time)
@@ -175,7 +204,7 @@ def upsert_attendance(
 
     existing = db.execute(
         select(Attendance).where(
-            Attendance.instance_id == profile.id,
+            Attendance.employment_id == employment.id,
             Attendance.date == day,
         )
     ).scalar_one_or_none()
@@ -184,7 +213,8 @@ def upsert_attendance(
 
     if existing is None:
         existing = Attendance(
-            instance_id=profile.id,
+            employment_id=employment.id,
+            instance_id=auth.instance.id,
             date=day,
             arrival_time=arrival,
             departure_time=departure,
@@ -193,6 +223,7 @@ def upsert_attendance(
     else:
         existing.arrival_time = arrival
         existing.departure_time = departure
+        existing.instance_id = auth.instance.id
 
     db.commit()
     return OkOut(ok=True)

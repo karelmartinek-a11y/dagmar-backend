@@ -8,12 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import require_admin, resolve_profile_instance
-from app.db.models import Attendance, AttendanceLock, Instance, ShiftPlan
+from app.api.deps import require_admin
+from app.db.models import Attendance, AttendanceLock, Employment, ShiftPlan
 from app.db.session import get_db
 from app.security.csrf import require_csrf
+from app.services.employment_access import employment_label
 from app.utils.timeparse import parse_hhmm_or_none, parse_yyyy_mm_dd
 
 router = APIRouter(tags=["admin"])
@@ -26,15 +27,18 @@ class AttendanceDayOut(BaseModel):
     planned_arrival_time: str | None = None
     planned_departure_time: str | None = None
     planned_status: str | None = None
+    is_within_employment_period: bool
 
 
 class AttendanceMonthOut(BaseModel):
-    days: list[AttendanceDayOut]
+    employment_id: int
+    employment_label: str
     locked: bool = False
+    days: list[AttendanceDayOut]
 
 
 class AttendanceUpsertIn(BaseModel):
-    instance_id: str = Field(..., min_length=1)
+    employment_id: int = Field(..., ge=1)
     date: str = Field(..., description="YYYY-MM-DD")
     arrival_time: str | None = Field(None, description="HH:MM or null")
     departure_time: str | None = Field(None, description="HH:MM or null")
@@ -45,7 +49,7 @@ class OkOut(BaseModel):
 
 
 class LockMonthIn(BaseModel):
-    instance_id: str = Field(..., min_length=1)
+    employment_id: int = Field(..., ge=1)
     year: int = Field(..., ge=2000, le=2100)
     month: int = Field(..., ge=1, le=12)
 
@@ -61,58 +65,63 @@ def _month_range(year: int, month: int) -> tuple[dt.date, dt.date]:
     return start, end
 
 
+def _get_employment(employment_id: int, db: Session) -> Employment:
+    employment = (
+        db.execute(select(Employment).options(joinedload(Employment.user)).where(Employment.id == employment_id))
+        .scalars()
+        .first()
+    )
+    if employment is None:
+        raise HTTPException(status_code=404, detail="Uvazek nenalezen.")
+    return employment
+
+
 @router.get("/api/v1/admin/attendance", response_model=AttendanceMonthOut)
 def admin_get_month_attendance(
-    instance_id: str = Query(..., description="Instance UUID"),
+    employment_id: int = Query(..., ge=1),
     year: int = Query(..., ge=2000, le=2100),
     month: int = Query(..., ge=1, le=12),
     _admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> AttendanceMonthOut:
-    inst = db.get(Instance, instance_id)
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instance not found")
-
-    profile = resolve_profile_instance(db, inst)
-
+    employment = _get_employment(employment_id, db)
     start, end = _month_range(year, month)
 
     rows = db.execute(
         select(Attendance)
-        .where(Attendance.instance_id == profile.id)
+        .where(Attendance.employment_id == employment.id)
         .where(Attendance.date >= start)
         .where(Attendance.date < end)
         .order_by(Attendance.date.asc())
     ).scalars().all()
-
     by_date: dict[dt.date, Attendance] = {r.date: r for r in rows}
 
     plan_by_date: dict[dt.date, ShiftPlan] = {}
     try:
         plan_rows = db.execute(
             select(ShiftPlan)
-            .where(ShiftPlan.instance_id == profile.id)
+            .where(ShiftPlan.employment_id == employment.id)
             .where(ShiftPlan.date >= start)
             .where(ShiftPlan.date < end)
         ).scalars().all()
         plan_by_date = {r.date: r for r in plan_rows}
-    except SQLAlchemyError as e:
-        # Pokud chybí tabulka shift_plan (např. neproběhla migrace), nepadáme na 500 a jen vrátíme docházku bez plánů.
-        logging.getLogger(__name__).warning("ShiftPlan unavailable, skipping planned times: %s", e)
+    except SQLAlchemyError as exc:
+        logging.getLogger(__name__).warning("ShiftPlan unavailable, skipping planned times: %s", exc)
 
     days: list[AttendanceDayOut] = []
     cur = start
     while cur < end:
-        r = by_date.get(cur)
-        p = plan_by_date.get(cur)
+        row = by_date.get(cur)
+        plan = plan_by_date.get(cur)
         days.append(
             AttendanceDayOut(
                 date=cur.isoformat(),
-                arrival_time=r.arrival_time if r else None,
-                departure_time=r.departure_time if r else None,
-                planned_arrival_time=p.arrival_time if p else None,
-                planned_departure_time=p.departure_time if p else None,
-                planned_status=p.status if p else None,
+                arrival_time=row.arrival_time if row else None,
+                departure_time=row.departure_time if row else None,
+                planned_arrival_time=plan.arrival_time if plan else None,
+                planned_departure_time=plan.departure_time if plan else None,
+                planned_status=plan.status if plan else None,
+                is_within_employment_period=employment.start_date <= cur and (employment.end_date is None or cur <= employment.end_date),
             )
         )
         cur = cur + dt.timedelta(days=1)
@@ -122,17 +131,22 @@ def admin_get_month_attendance(
         locked = (
             db.execute(
                 select(AttendanceLock).where(
-                    AttendanceLock.instance_id == profile.id,
+                    AttendanceLock.employment_id == employment.id,
                     AttendanceLock.year == year,
                     AttendanceLock.month == month,
                 )
             ).scalar_one_or_none()
             is not None
         )
-    except SQLAlchemyError as e:
-        logging.getLogger(__name__).warning("AttendanceLock unavailable, treating as unlocked: %s", e)
+    except SQLAlchemyError as exc:
+        logging.getLogger(__name__).warning("AttendanceLock unavailable, treating as unlocked: %s", exc)
 
-    return AttendanceMonthOut(days=days, locked=locked)
+    return AttendanceMonthOut(
+        employment_id=employment.id,
+        employment_label=employment_label(employment, employment.user.name if employment.user else None),
+        days=days,
+        locked=locked,
+    )
 
 
 @router.put("/api/v1/admin/attendance", response_model=OkOut)
@@ -142,35 +156,33 @@ def admin_upsert_attendance(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> OkOut:
-    inst = db.get(Instance, body.instance_id)
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instance not found")
+    employment = _get_employment(body.employment_id, db)
 
-    profile = resolve_profile_instance(db, inst)
-
-    # Validate date
     try:
         day = parse_yyyy_mm_dd(body.date)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Validate times (only format/range, no other business rules)
+    if day < employment.start_date or (employment.end_date is not None and day > employment.end_date):
+        raise HTTPException(status_code=409, detail="Datum nelezi v obdobi platnosti vybraneho uvazku.")
+
     try:
         arrival = parse_hhmm_or_none(body.arrival_time)
         departure = parse_hhmm_or_none(body.departure_time)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     existing = db.execute(
         select(Attendance).where(
-            Attendance.instance_id == profile.id,
+            Attendance.employment_id == employment.id,
             Attendance.date == day,
         )
     ).scalar_one_or_none()
 
     if existing is None:
         existing = Attendance(
-            instance_id=profile.id,
+            employment_id=employment.id,
+            instance_id=employment.user.instance_id if employment.user else None,
             date=day,
             arrival_time=arrival,
             departure_time=departure,
@@ -191,22 +203,18 @@ def lock_month(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> OkOut:
-    inst = db.get(Instance, body.instance_id)
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instance not found")
-
-    profile = resolve_profile_instance(db, inst)
-
+    employment = _get_employment(body.employment_id, db)
     existing = db.execute(
         select(AttendanceLock).where(
-            AttendanceLock.instance_id == profile.id,
+            AttendanceLock.employment_id == employment.id,
             AttendanceLock.year == body.year,
             AttendanceLock.month == body.month,
         )
     ).scalar_one_or_none()
     if existing is None:
         lock = AttendanceLock(
-            instance_id=profile.id,
+            employment_id=employment.id,
+            instance_id=employment.user.instance_id if employment.user else None,
             year=body.year,
             month=body.month,
             locked_by=admin.username or None,
@@ -224,15 +232,10 @@ def unlock_month(
     admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> OkOut:
-    inst = db.get(Instance, body.instance_id)
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instance not found")
-
-    profile = resolve_profile_instance(db, inst)
-
+    employment = _get_employment(body.employment_id, db)
     lock = db.execute(
         select(AttendanceLock).where(
-            AttendanceLock.instance_id == profile.id,
+            AttendanceLock.employment_id == employment.id,
             AttendanceLock.year == body.year,
             AttendanceLock.month == body.month,
         )

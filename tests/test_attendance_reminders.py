@@ -1,23 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import Settings
-from app.db.models import (
-    Attendance,
-    AttendanceReminderEvent,
-    Base,
-    ClientType,
-    Instance,
-    InstanceStatus,
-    PortalUser,
-    PortalUserRole,
-    ShiftPlan,
-)
+from app.db.models import Attendance, AttendanceReminderEvent, Base, ClientType, Employment, Instance, InstanceStatus, PortalUser, PortalUserRole, ShiftPlan
+from app.security.passwords import hash_password
 from app.services.attendance_reminders import process_attendance_reminders
 
 
@@ -29,7 +20,7 @@ def _settings() -> Settings:
     )
 
 
-def _session_local() -> sessionmaker:
+def _session_local() -> sessionmaker[Session]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -40,29 +31,48 @@ def _session_local() -> sessionmaker:
     return session_local
 
 
+def _seed_user_with_employment(db: Session, *, instance_id: str, name: str, email: str) -> Employment:
+    instance = Instance(
+        id=instance_id,
+        client_type=ClientType.WEB,
+        device_fingerprint=f"fp-{instance_id}",
+        status=InstanceStatus.ACTIVE,
+        display_name=name,
+        created_at=datetime.now(UTC),
+        last_seen_at=datetime.now(UTC),
+        activated_at=datetime.now(UTC),
+        employment_template="DPP_DPC",
+    )
+    user = PortalUser(
+        email=email,
+        name=name,
+        role=PortalUserRole.EMPLOYEE,
+        instance_id=instance.id,
+        is_active=True,
+        password_hash=hash_password("StrongPass123").value,
+    )
+    employment = Employment(
+        user=user,
+        title="Výchozí úvazek",
+        employment_type="DPP_DPC",
+        start_date=date(2025, 1, 1),
+        end_date=None,
+        is_active=True,
+    )
+    db.add(instance)
+    db.add(user)
+    db.add(employment)
+    db.commit()
+    db.refresh(employment)
+    return employment
+
+
 def test_missing_arrival_reminder_is_sent_once_per_sequence() -> None:
     session_local = _session_local()
 
     with session_local() as db:
-        db.add(
-            Instance(
-                id="inst-1",
-                client_type=ClientType.WEB,
-                device_fingerprint="fp-1",
-                status=InstanceStatus.ACTIVE,
-                display_name="Jana",
-            )
-        )
-        db.add(
-            PortalUser(
-                email="jana@example.com",
-                name="Jana",
-                role=PortalUserRole.EMPLOYEE,
-                instance_id="inst-1",
-                is_active=True,
-            )
-        )
-        db.add(ShiftPlan(instance_id="inst-1", date=datetime(2026, 3, 13).date(), arrival_time="08:00", departure_time="16:00"))
+        employment = _seed_user_with_employment(db, instance_id="inst-1", name="Jana", email="jana@example.com")
+        db.add(ShiftPlan(employment_id=employment.id, instance_id="inst-1", date=datetime(2026, 3, 13).date(), arrival_time="08:00", departure_time="16:00"))
         db.commit()
 
         sent: list[tuple[str, str]] = []
@@ -75,9 +85,9 @@ def test_missing_arrival_reminder_is_sent_once_per_sequence() -> None:
         )
         assert count == 3
         assert sent == [
-            ("jana@example.com", "Nemáš zapsaný příchod"),
-            ("jana@example.com", "Nemáš zapsaný příchod"),
-            ("jana@example.com", "Nemáš zapsaný příchod"),
+            ("jana@example.com", "Nemas zapsany prichod"),
+            ("jana@example.com", "Nemas zapsany prichod"),
+            ("jana@example.com", "Nemas zapsany prichod"),
         ]
 
         count_again = process_attendance_reminders(
@@ -94,26 +104,9 @@ def test_missing_departure_reminder_starts_two_hours_after_planned_departure() -
     session_local = _session_local()
 
     with session_local() as db:
-        db.add(
-            Instance(
-                id="inst-2",
-                client_type=ClientType.WEB,
-                device_fingerprint="fp-2",
-                status=InstanceStatus.ACTIVE,
-                display_name="Marie",
-            )
-        )
-        db.add(
-            PortalUser(
-                email="marie@example.com",
-                name="Marie",
-                role=PortalUserRole.EMPLOYEE,
-                instance_id="inst-2",
-                is_active=True,
-            )
-        )
-        db.add(ShiftPlan(instance_id="inst-2", date=datetime(2026, 3, 13).date(), arrival_time="08:00", departure_time="16:00"))
-        db.add(Attendance(instance_id="inst-2", date=datetime(2026, 3, 13).date(), arrival_time="08:00", departure_time=None))
+        employment = _seed_user_with_employment(db, instance_id="inst-2", name="Marie", email="marie@example.com")
+        db.add(ShiftPlan(employment_id=employment.id, instance_id="inst-2", date=datetime(2026, 3, 13).date(), arrival_time="08:00", departure_time="16:00"))
+        db.add(Attendance(employment_id=employment.id, instance_id="inst-2", date=datetime(2026, 3, 13).date(), arrival_time="08:00", departure_time=None))
         db.commit()
 
         sent: list[tuple[str, str]] = []
@@ -134,9 +127,9 @@ def test_missing_departure_reminder_starts_two_hours_after_planned_departure() -
         )
         assert count == 3
         assert sent == [
-            ("marie@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
-            ("marie@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
-            ("marie@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+            ("marie@example.com", "Jsi jeste v praci? Nemas zapsan odchod"),
+            ("marie@example.com", "Jsi jeste v praci? Nemas zapsan odchod"),
+            ("marie@example.com", "Jsi jeste v praci? Nemas zapsan odchod"),
         ]
 
 
@@ -144,25 +137,8 @@ def test_previous_day_missing_departure_reminder_runs_from_8am() -> None:
     session_local = _session_local()
 
     with session_local() as db:
-        db.add(
-            Instance(
-                id="inst-3",
-                client_type=ClientType.WEB,
-                device_fingerprint="fp-3",
-                status=InstanceStatus.ACTIVE,
-                display_name="Eva",
-            )
-        )
-        db.add(
-            PortalUser(
-                email="eva@example.com",
-                name="Eva",
-                role=PortalUserRole.EMPLOYEE,
-                instance_id="inst-3",
-                is_active=True,
-            )
-        )
-        db.add(Attendance(instance_id="inst-3", date=datetime(2026, 3, 12).date(), arrival_time="08:00", departure_time=None))
+        employment = _seed_user_with_employment(db, instance_id="inst-3", name="Eva", email="eva@example.com")
+        db.add(Attendance(employment_id=employment.id, instance_id="inst-3", date=datetime(2026, 3, 12).date(), arrival_time="08:00", departure_time=None))
         db.commit()
 
         sent: list[tuple[str, str]] = []
@@ -183,8 +159,8 @@ def test_previous_day_missing_departure_reminder_runs_from_8am() -> None:
         )
         assert count == 4
         assert sent == [
-            ("eva@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
-            ("eva@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
-            ("eva@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
-            ("eva@example.com", "Jsi ještě v práci? Nemáš zapsán odchod"),
+            ("eva@example.com", "Jsi jeste v praci? Nemas zapsan odchod"),
+            ("eva@example.com", "Jsi jeste v praci? Nemas zapsan odchod"),
+            ("eva@example.com", "Jsi jeste v praci? Nemas zapsan odchod"),
+            ("eva@example.com", "Jsi jeste v praci? Nemas zapsan odchod"),
         ]
