@@ -7,6 +7,7 @@ import smtplib
 from datetime import UTC, date, datetime, timedelta
 from email.message import EmailMessage
 from types import SimpleNamespace
+from typing import Any
 from typing import cast as typing_cast
 from uuid import uuid4
 
@@ -264,7 +265,19 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
     if not user_rows:
         return PortalUserListOut(users=[])
 
-    user_ids = [int(row["id"]) for row in user_rows]
+    safe_user_rows: list[tuple[int, Any]] = []
+    user_ids: list[int] = []
+    for row in user_rows:
+        try:
+            user_id = int(row["id"])
+        except Exception:
+            continue
+        safe_user_rows.append((user_id, row))
+        user_ids.append(user_id)
+
+    if not user_ids:
+        return PortalUserListOut(users=[])
+
     employment_rows = db.execute(
         select(
             employments_table.c.id,
@@ -281,19 +294,22 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
 
     employments_by_user: dict[int, list[SimpleNamespace]] = {}
     for row in employment_rows:
-        employment = SimpleNamespace(
-            id=int(row["id"]),
-            user_id=int(row["user_id"]),
-            title=row["title"],
-            employment_type=row["employment_type"],
-            start_date=row["start_date"],
-            end_date=row["end_date"],
-            is_active=bool(row["is_active"]),
-            user=SimpleNamespace(name=""),
-        )
+        try:
+            employment = SimpleNamespace(
+                id=int(row["id"]),
+                user_id=int(row["user_id"]),
+                title=row["title"],
+                employment_type=row["employment_type"],
+                start_date=row["start_date"],
+                end_date=row["end_date"],
+                is_active=bool(row["is_active"]),
+                user=SimpleNamespace(name=""),
+            )
+        except Exception:
+            continue
         employments_by_user.setdefault(employment.user_id, []).append(employment)
 
-    principals = [str(row["email"]).lower() for row in user_rows if row["email"]]
+    principals = [str(row["email"]).lower() for _, row in safe_user_rows if row["email"]]
     lock_rows = (
         db.execute(
             select(AuthLockoutState).where(
@@ -307,25 +323,32 @@ def list_users(_admin=Depends(require_admin), db: Session = Depends(get_db)):
     locks_by_principal = {row.principal: row for row in lock_rows}
 
     out: list[PortalUserOut] = []
-    for row in user_rows:
-        user_id = int(row["id"])
-        name = str(row["name"] or "").strip()
-        email = str(row["email"] or "").strip()
-        employments = employments_by_user.get(user_id, [])
-        for employment in employments:
-            employment.user = SimpleNamespace(name=name)
+    for user_id, row in safe_user_rows:
+        try:
+            name = str(row["name"] or "").strip()
+            email = str(row["email"] or "").strip()
+            employments = employments_by_user.get(user_id, [])
+            for employment in employments:
+                employment.user = SimpleNamespace(name=name)
 
-        user_like = SimpleNamespace(
-            id=user_id,
-            name=name,
-            email=email,
-            phone=row["phone"],
-            role=SimpleNamespace(value=str(row["role"] or "").strip() or "employee"),
-            password_hash=row["password_hash"],
-            is_active=bool(row["is_active"]),
-            employments=employments,
-        )
-        out.append(_to_user_out(typing_cast(PortalUser, user_like), locks_by_principal.get(email.lower()) if email else None))
+            user_like = SimpleNamespace(
+                id=user_id,
+                name=name,
+                email=email,
+                phone=row["phone"],
+                role=SimpleNamespace(value=str(row["role"] or "").strip() or "employee"),
+                password_hash=row["password_hash"],
+                is_active=bool(row["is_active"]),
+                employments=employments,
+            )
+            out.append(
+                _to_user_out(
+                    typing_cast(PortalUser, user_like),
+                    locks_by_principal.get(email.lower()) if email else None,
+                )
+            )
+        except Exception:
+            continue
 
     return PortalUserListOut(users=out)
 
