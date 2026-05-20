@@ -7,7 +7,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import Settings
-from app.db.models import Attendance, AttendanceReminderEvent, Base, ClientType, Employment, Instance, InstanceStatus, PortalUser, PortalUserRole, ShiftPlan
+from app.db.models import (
+    Attendance,
+    AttendanceReminderEvent,
+    Base,
+    ClientType,
+    Employment,
+    Instance,
+    InstanceStatus,
+    PortalUser,
+    PortalUserRole,
+    ShiftPlan,
+)
 from app.security.passwords import hash_password
 from app.services.attendance_reminders import process_attendance_reminders
 

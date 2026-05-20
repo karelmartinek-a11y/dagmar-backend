@@ -11,8 +11,17 @@ from sqlalchemy.pool import StaticPool
 from app.api.deps import require_admin
 from app.api.v1 import admin_attendance, admin_shift_plan, admin_users, attendance, portal_auth
 from app.api.v1.admin_employments import router as admin_employments_router
-from app.db.models import Attendance, Employment, Instance, PortalUser, PortalUserRole, ShiftPlan
-from app.db.models import Base, ClientType, InstanceStatus
+from app.db.models import (
+    Attendance,
+    Base,
+    ClientType,
+    Employment,
+    Instance,
+    InstanceStatus,
+    PortalUser,
+    PortalUserRole,
+    ShiftPlan,
+)
 from app.security.csrf import require_csrf
 from app.security.passwords import hash_password
 from app.services.employment_access import add_calendar_months
@@ -243,6 +252,7 @@ def test_confirmed_employment_period_change_deletes_out_of_range_data() -> None:
 
 def test_attendance_and_shift_plan_are_stored_by_employment_id() -> None:
     client, session_local = _build_client()
+    target_day = date.today() - timedelta(days=1)
     with session_local() as db:
         user = _create_user(db, email="storage@example.com")
         employment = _add_employment(db, user, start_date=date(2025, 1, 1), end_date=None)
@@ -258,7 +268,7 @@ def test_attendance_and_shift_plan_are_stored_by_employment_id() -> None:
             headers={"Authorization": f"Bearer {token}"},
             json={
                 "employment_id": employment_id,
-                "date": date.today().isoformat(),
+                "date": target_day.isoformat(),
                 "arrival_time": "08:00",
                 "departure_time": "16:00",
         },
@@ -269,7 +279,7 @@ def test_attendance_and_shift_plan_are_stored_by_employment_id() -> None:
         "/api/v1/admin/shift-plan",
         json={
             "employment_id": employment_id,
-            "date": date.today().isoformat(),
+            "date": target_day.isoformat(),
             "arrival_time": "08:00",
             "departure_time": "16:00",
         },

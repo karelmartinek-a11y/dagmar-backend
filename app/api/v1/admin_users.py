@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import smtplib
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from email.message import EmailMessage
 from uuid import uuid4
 
@@ -153,16 +153,30 @@ def _normalize_phone(raw_phone: str | None) -> str | None:
     return phone or None
 
 
+def _safe_iso_date(value: object) -> str | None:
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return None
+
+
+def _employment_sort_key(employment: Employment) -> tuple[date, int]:
+    start_date = employment.start_date if isinstance(employment.start_date, date) else date.max
+    return (start_date, employment.id)
+
+
 def _to_employment_out(employment: Employment) -> EmploymentOut:
     return EmploymentOut(
         id=employment.id,
         user_id=employment.user_id,
-        title=employment.title,
-        employment_type=employment.employment_type,
-        start_date=employment.start_date.isoformat(),
-        end_date=employment.end_date.isoformat() if employment.end_date is not None else None,
+        title=(employment.title or "").strip() or "Bez názvu úvazku",
+        employment_type=str(employment.employment_type or "").strip() or "DPP_DPC",
+        start_date=_safe_iso_date(employment.start_date) or "1970-01-01",
+        end_date=_safe_iso_date(employment.end_date),
         is_active=employment.is_active,
-        label=employment_label(employment),
+        label=employment_label(employment, user_name=getattr(employment.user, "name", None)),
     )
 
 
@@ -170,7 +184,10 @@ def _user_login_status(user: PortalUser) -> tuple[str, str | None]:
     if not user.is_active:
         return "DEACTIVATED", "Ucet je rucne deaktivovany administratorem."
     today = prague_today()
-    selection = select_login_employments(user, today)
+    try:
+        selection = select_login_employments(user, today)
+    except Exception:
+        return "EMPLOYMENT_WINDOW_BLOCKED", "Uzivatel ma nekonzistentni historicka data uvazku."
     if selection.available:
         return "ACTIVE", None
     if user.employments:
@@ -181,13 +198,13 @@ def _user_login_status(user: PortalUser) -> tuple[str, str | None]:
 def _to_user_out(user: PortalUser, lock_state: AuthLockoutState | None = None) -> PortalUserOut:
     locked_until = as_utc(lock_state.locked_until) if lock_state is not None else None
     login_status, login_status_reason = _user_login_status(user)
-    employments = sorted(user.employments, key=lambda item: (item.start_date, item.id))
+    employments = sorted(user.employments, key=_employment_sort_key)
     return PortalUserOut(
         id=user.id,
-        name=user.name,
-        email=user.email,
+        name=(user.name or "").strip(),
+        email=(user.email or "").strip(),
         phone=user.phone,
-        role=user.role.value,
+        role=user.role.value if hasattr(user.role, "value") else str(user.role or ""),
         has_password=bool(user.password_hash),
         is_active=user.is_active,
         is_locked=is_locked(lock_state),
