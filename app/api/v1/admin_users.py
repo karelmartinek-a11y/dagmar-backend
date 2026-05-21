@@ -512,27 +512,11 @@ def delete_user(
     if user is None:
         raise HTTPException(status_code=404, detail="Uzivatel nenalezen.")
 
-    instance_id = user.instance_id
     clear_user_lockout(db, actor_type="portal", principal=user.email.lower())
     revoke_unlock_tokens(db, actor_type="portal", principal=user.email.lower())
     for employment in list(user.employments):
         db.delete(employment)
     db.delete(user)
-
-    if instance_id:
-        other_links = db.execute(
-            select(PortalUser).where(PortalUser.instance_id == instance_id).where(PortalUser.id != user.id)
-        ).scalars().first()
-        if other_links is None:
-            inst = db.get(Instance, instance_id)
-            if inst is not None:
-                inst.token_hash = None
-                inst.token_issued_at = None
-                if hasattr(inst, "status"):
-                    inst.status = InstanceStatus.DEACTIVATED
-                if not inst.display_name:
-                    inst.display_name = "Smazany uzivatel"
-                db.add(inst)
 
     db.commit()
     return OkOut(ok=True)
