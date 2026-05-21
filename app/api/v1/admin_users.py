@@ -514,6 +514,7 @@ def delete_user(
 
     clear_user_lockout(db, actor_type="portal", principal=user.email.lower())
     revoke_unlock_tokens(db, actor_type="portal", principal=user.email.lower())
+    db.execute(delete(PortalUserResetToken).where(PortalUserResetToken.user_id == user.id))
     for employment in list(user.employments):
         db.delete(employment)
     db.delete(user)
