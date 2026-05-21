@@ -504,20 +504,20 @@ def delete_user(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ):
-    user = (
-        db.execute(select(PortalUser).options(selectinload(PortalUser.employments)).where(PortalUser.id == int(user_id)))
-        .scalars()
-        .first()
-    )
-    if user is None:
+    row = db.execute(
+        select(PortalUser.id, PortalUser.email).where(PortalUser.id == int(user_id))
+    ).mappings().first()
+    if row is None:
         raise HTTPException(status_code=404, detail="Uzivatel nenalezen.")
 
-    clear_user_lockout(db, actor_type="portal", principal=user.email.lower())
-    revoke_unlock_tokens(db, actor_type="portal", principal=user.email.lower())
-    db.execute(delete(PortalUserResetToken).where(PortalUserResetToken.user_id == user.id))
-    for employment in list(user.employments):
-        db.delete(employment)
-    db.delete(user)
+    email = str(row["email"] or "").strip().lower()
+    if email:
+        clear_user_lockout(db, actor_type="portal", principal=email)
+        revoke_unlock_tokens(db, actor_type="portal", principal=email)
+
+    db.execute(delete(PortalUserResetToken).where(PortalUserResetToken.user_id == int(user_id)))
+    db.execute(delete(Employment).where(Employment.user_id == int(user_id)))
+    db.execute(delete(PortalUser).where(PortalUser.id == int(user_id)))
 
     db.commit()
     return OkOut(ok=True)
