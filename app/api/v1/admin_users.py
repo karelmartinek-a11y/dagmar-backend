@@ -526,7 +526,13 @@ def delete_user(
         if other_links is None:
             inst = db.get(Instance, instance_id)
             if inst is not None:
-                db.delete(inst)
+                inst.token_hash = None
+                inst.token_issued_at = None
+                if hasattr(inst, "status"):
+                    inst.status = InstanceStatus.DEACTIVATED
+                if not inst.display_name:
+                    inst.display_name = "Smazany uzivatel"
+                db.add(inst)
 
     db.commit()
     return OkOut(ok=True)
