@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 from types import SimpleNamespace
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -154,7 +155,7 @@ def _load_available_employment_rows(db: Session, year: int, month: int) -> list[
             is_active=bool(row["is_active"]),
             user=SimpleNamespace(name=row["user_name"] or f"Uživatel {row['user_id']}"),
         )
-        if employment_overlaps_month(employment, month_start, month_end):
+        if employment_overlaps_month(cast(Employment, employment), month_start, month_end):
             available.append(employment)
     return available
 
@@ -172,7 +173,7 @@ def admin_get_shift_plan_month(
 def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int) -> ShiftPlanMonthOut:
     start, end = _month_range(year, month)
     available_employments = _load_available_employment_rows(db, year, month)
-    available_out = [_to_active_employment_out(item) for item in available_employments]
+    available_out = [_to_active_employment_out(cast(Employment, item)) for item in available_employments]
     available_ids = [item.id for item in available_employments]
 
     try:
@@ -245,7 +246,7 @@ def _admin_get_shift_plan_month_impl(db: Session, *, year: int, month: int) -> S
                 user_name=user_name,
                 title=employment.title,
                 employment_type=employment.employment_type,
-                display_label=employment_label(employment, user_name),
+                display_label=employment_label(cast(Employment, employment), user_name),
                 days=days,
             )
         )
