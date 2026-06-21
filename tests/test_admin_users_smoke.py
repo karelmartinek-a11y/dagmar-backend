@@ -320,6 +320,48 @@ def test_attendance_and_shift_plan_are_stored_by_employment_id() -> None:
         assert shift_plan_row.instance_id == instance_id
 
 
+def test_portal_attendance_rejects_locked_month_for_read_and_write() -> None:
+    client, session_local = _build_client()
+    target_day = date(2026, 2, 10)
+    with session_local() as db:
+        user = _create_user(db, email="locked-month@example.com")
+        employment = _add_employment(db, user, start_date=date(2025, 1, 1), end_date=None)
+        db.add(
+            AttendanceLock(
+                employment_id=employment.id,
+                instance_id=user.instance_id,
+                year=target_day.year,
+                month=target_day.month,
+                locked_by="admin",
+            )
+        )
+        db.commit()
+        employment_id = employment.id
+
+    login_response = _portal_login(client, "locked-month@example.com")
+    assert login_response.status_code == 200
+    token = login_response.json()["instance_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    read_response = client.get(
+        f"/api/v1/attendance?employment_id={employment_id}&year={target_day.year}&month={target_day.month}",
+        headers=headers,
+    )
+    assert read_response.status_code == 423
+
+    write_response = client.put(
+        "/api/v1/attendance",
+        headers=headers,
+        json={
+            "employment_id": employment_id,
+            "date": target_day.isoformat(),
+            "arrival_time": "08:00",
+            "departure_time": "16:00",
+        },
+    )
+    assert write_response.status_code == 423
+
+
 def test_shift_plan_defaults_to_active_employments_and_keeps_inactive_available_for_filtering() -> None:
     client, session_local = _build_client()
     with session_local() as db:

@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import PortalUserAuth, require_portal_user_auth
-from app.db.models import Attendance, Employment, ShiftPlan
+from app.db.models import Attendance, AttendanceLock, Employment, ShiftPlan
 from app.db.session import get_db
 from app.services.employment_access import employment_label
 from app.services.prague_time import prague_minutes_since_midnight, prague_today
@@ -84,6 +84,21 @@ def _ensure_day_in_employment_period(employment: Employment, day: dt.date) -> No
         )
 
 
+def _ensure_month_not_locked(employment_id: int, year: int, month: int, db: Session) -> None:
+    lock = db.execute(
+        select(AttendanceLock).where(
+            AttendanceLock.employment_id == employment_id,
+            AttendanceLock.year == year,
+            AttendanceLock.month == month,
+        )
+    ).scalar_one_or_none()
+    if lock is not None:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="Dochazka za zvolene obdobi je uzamcena.",
+        )
+
+
 def _enforce_user_forensic_rules(
     *,
     day: dt.date,
@@ -131,6 +146,7 @@ def get_month_attendance(
 ) -> AttendanceMonthOut:
     start, end = _month_range(year, month)
     employment = _require_accessible_employment(employment_id, auth, db)
+    _ensure_month_not_locked(employment.id, year, month, db)
 
     rows = db.execute(
         select(Attendance)
@@ -195,6 +211,7 @@ def upsert_attendance(
 
     employment = _require_accessible_employment(body.employment_id, auth, db)
     _ensure_day_in_employment_period(employment, day)
+    _ensure_month_not_locked(employment.id, day.year, day.month, db)
 
     try:
         arrival = parse_hhmm_or_none(body.arrival_time)
