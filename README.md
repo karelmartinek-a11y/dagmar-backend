@@ -154,7 +154,7 @@ Krátký seznam endpointů:
   - `POST /api/v1/admin/instances/{id}/activate`
   - `POST /api/v1/admin/instances/{id}/rename`
   - `POST /api/v1/admin/instances/{id}/revoke`
-  - `GET /api/v1/admin/export?month=YYYY-MM&instance_id=...`
+  - `GET /api/v1/admin/export?month=YYYY-MM&employment_id=...`
   - `GET /api/v1/admin/export?month=YYYY-MM&bulk=true`
 
 ---

@@ -48,7 +48,6 @@ class LoginEmploymentOut(BaseModel):
 
 
 class PortalLoginOut(BaseModel):
-    instance_id: str
     instance_token: str
     display_name: str
     employment_id: int | None = None
@@ -149,7 +148,6 @@ def portal_login(payload: PortalLoginIn, db: Session = Depends(get_db)):
     db.commit()
 
     return PortalLoginOut(
-        instance_id=user.instance.id,
         instance_token=token,
         display_name=user.name,
         employment_id=selection.default.id if selection.default is not None else None,

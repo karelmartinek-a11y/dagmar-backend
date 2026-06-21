@@ -141,6 +141,7 @@ def test_user_with_open_ended_employment_can_login() -> None:
     response = _portal_login(client, "employee@example.com")
     assert response.status_code == 200
     payload = response.json()
+    assert "instance_id" not in payload
     assert payload["employment_id"] is not None
     assert len(payload["available_employments"]) == 1
 

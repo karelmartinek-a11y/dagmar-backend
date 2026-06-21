@@ -29,7 +29,6 @@ class InstanceOut(BaseModel):
     device_fingerprint: str
     status: Literal["PENDING", "ACTIVE", "REVOKED", "DEACTIVATED"]
     display_name: str | None = None
-    profile_instance_id: str | None = None
     created_at: datetime
     last_seen_at: datetime | None = None
     activated_at: datetime | None = None
@@ -167,7 +166,6 @@ def list_instances(
             device_fingerprint=i.device_fingerprint,
             status=i.status.value,
             display_name=i.display_name,
-            profile_instance_id=i.profile_instance_id,
             created_at=i.created_at,
             last_seen_at=i.last_seen_at,
             activated_at=i.activated_at,
