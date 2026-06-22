@@ -4,6 +4,7 @@ from datetime import date, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -42,6 +43,12 @@ class ClientType(StrEnum):
 
 class PortalUserRole(StrEnum):
     EMPLOYEE = "employee"
+
+
+class IntegrationClientStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+    REVOKED = "REVOKED"
 
 
 class Instance(Base):
@@ -377,3 +384,91 @@ class AppSettings(Base):
     smtp_from_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     smtp_from_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     smtp_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class IntegrationClient(Base):
+    __tablename__ = "integration_clients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=IntegrationClientStatus.ACTIVE.value,
+        server_default=IntegrationClientStatus.ACTIVE.value,
+    )
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    allowed_employment_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
+    allowed_employee_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
+    ip_allowlist: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    secrets: Mapped[list[IntegrationClientSecret]] = relationship(
+        "IntegrationClientSecret", back_populates="client", cascade="all, delete-orphan", passive_deletes=True
+    )
+    audit_logs: Mapped[list[IntegrationAuditLog]] = relationship(
+        "IntegrationAuditLog", back_populates="client", passive_deletes=True
+    )
+
+    __table_args__ = (
+        Index("ix_integration_clients_status", "status"),
+        Index("ix_integration_clients_last_used_at", "last_used_at"),
+    )
+
+
+class IntegrationClientSecret(Base):
+    __tablename__ = "integration_client_secrets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("integration_clients.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    token_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
+    token_last4: Mapped[str] = mapped_column(String(4), nullable=False)
+    token_fingerprint: Mapped[str] = mapped_column(String(32), nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    client: Mapped[IntegrationClient] = relationship("IntegrationClient", back_populates="secrets")
+
+    __table_args__ = (
+        Index("ix_integration_client_secrets_client_id", "client_id"),
+        Index("ix_integration_client_secrets_token_prefix", "token_prefix"),
+        Index("ix_integration_client_secrets_token_fingerprint", "token_fingerprint"),
+    )
+
+
+class IntegrationAuditLog(Base):
+    __tablename__ = "integration_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    client_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("integration_clients.id", ondelete="SET NULL"), nullable=True
+    )
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    method: Mapped[str] = mapped_column(String(8), nullable=False)
+    path: Mapped[str] = mapped_column(String(255), nullable=False)
+    query_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    client: Mapped[IntegrationClient | None] = relationship("IntegrationClient", back_populates="audit_logs")
+
+    __table_args__ = (
+        Index("ix_integration_audit_log_client_id", "client_id"),
+        Index("ix_integration_audit_log_requested_at", "requested_at"),
+        Index("ix_integration_audit_log_path", "path"),
+    )

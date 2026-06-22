@@ -17,6 +17,7 @@ Backend implementuje:
 
 - portal přihlášení zaměstnance (e-mail + heslo) a vydání bearer tokenu
 - docházku (arrival/departure po dnech) s upsertem
+- externí read-only integrační API pod `/api/v1/integration`
 - admin přihlášení přes **session cookie** + **CSRF** ochranu
 - exporty:
   - CSV pro konkrétní instanci a měsíc
@@ -151,11 +152,50 @@ Krátký seznam endpointů:
   - `POST /api/v1/admin/logout`
   - `GET /api/v1/admin/me`
   - `GET /api/v1/admin/instances`
+  - `GET /api/v1/admin/integrations/clients`
+  - `POST /api/v1/admin/integrations/clients`
+  - `POST /api/v1/admin/integrations/clients/{id}/rotate`
   - `POST /api/v1/admin/instances/{id}/activate`
   - `POST /api/v1/admin/instances/{id}/rename`
   - `POST /api/v1/admin/instances/{id}/revoke`
   - `GET /api/v1/admin/export?month=YYYY-MM&employment_id=...`
   - `GET /api/v1/admin/export?month=YYYY-MM&bulk=true`
+
+- Integration:
+  - `GET /api/v1/integration/health`
+  - `GET /api/v1/integration/employments`
+  - `GET /api/v1/integration/shift-plan`
+  - `GET /api/v1/integration/attendances`
+  - `GET /api/v1/integration/punches`
+  - `GET /api/v1/integration/locks`
+  - `GET /api/v1/integration/openapi.json`
+
+## 5.1 Integrační API
+
+- autentizace je samostatným bearer tokenem ve formátu `Authorization: Bearer dgi_<token>`
+- integrační tokeny jsou oddělené od zaměstnaneckých `dg_` tokenů
+- `/api/v1/integration/punches` vrací pouze **odvozené průchody** z `attendance.arrival_time` a `attendance.departure_time`
+- `/api/v1/integration/changes` v této etapě neexistuje, protože backend zatím nemá spolehlivý change log
+- list endpointy vrací `data` a `pagination`
+- `shift-plan`, `attendances` a `punches` vyžadují `date_from` a `date_to`, maximální období je 31 dní
+
+## 5.2 Provozní správa integračních klientů
+
+Integrační klienty lze spravovat dvěma cestami:
+
+- produkční admin sekcí `https://dagmar.hcasc.cz/admin/integrace`
+- fallback skriptem:
+
+```bash
+python scripts/manage_integrations.py list
+python scripts/manage_integrations.py create --name "mzdovy-import" --scopes "integration:health,employments:read"
+python scripts/manage_integrations.py rotate 1
+python scripts/manage_integrations.py disable 1
+python scripts/manage_integrations.py enable 1
+python scripts/manage_integrations.py revoke 1
+```
+
+Plaintext integrační token se zobrazuje pouze při vytvoření nebo rotaci. Do databáze se ukládá jen hash, fingerprint a `last4`.
 
 ---
 

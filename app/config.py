@@ -97,13 +97,18 @@ class Settings(BaseModel):
     rate_limit_admin_login_per_minute: int = Field(default=10)
     rate_limit_instance_status_per_minute: int = Field(default=60)
     rate_limit_instance_claim_per_minute: int = Field(default=30)
+    rate_limit_integration_health_per_minute: int = Field(default=60)
+    rate_limit_integration_data_per_minute: int = Field(default=120)
+    rate_limit_integration_openapi_per_minute: int = Field(default=10)
 
     # --- Security / tokens ---
     instance_token_length: int = Field(default=48, description="Random token length")
+    integration_token_length: int = Field(default=48, description="Random token length for integration clients")
 
     # --- Logging ---
     log_level: str = Field(default="INFO")
     disable_docs: bool = Field(default=True)
+    integration_contract_version: str = Field(default="2026-06-22")
 
     # --- Deploy metadata ---
     deploy_tag: str = Field(
@@ -211,9 +216,20 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
         rate_limit_instance_claim_per_minute=int(
             os.getenv("DAGMAR_RATE_LIMIT_INSTANCE_CLAIM_PER_MINUTE", "30")
         ),
+        rate_limit_integration_health_per_minute=int(
+            os.getenv("DAGMAR_RATE_LIMIT_INTEGRATION_HEALTH_PER_MINUTE", "60")
+        ),
+        rate_limit_integration_data_per_minute=int(
+            os.getenv("DAGMAR_RATE_LIMIT_INTEGRATION_DATA_PER_MINUTE", "120")
+        ),
+        rate_limit_integration_openapi_per_minute=int(
+            os.getenv("DAGMAR_RATE_LIMIT_INTEGRATION_OPENAPI_PER_MINUTE", "10")
+        ),
         instance_token_length=int(os.getenv("DAGMAR_INSTANCE_TOKEN_LENGTH", "48")),
+        integration_token_length=int(os.getenv("DAGMAR_INTEGRATION_TOKEN_LENGTH", "48")),
         log_level=os.getenv("DAGMAR_LOG_LEVEL", "INFO"),
         disable_docs=os.getenv("DAGMAR_DISABLE_DOCS", "true").lower() == "true",
+        integration_contract_version=os.getenv("DAGMAR_INTEGRATION_CONTRACT_VERSION", "2026-06-22"),
         deploy_tag=os.getenv(
             "DAGMAR_DEPLOY_TAG",
             _format_deploy_tag(datetime.now(UTC)),

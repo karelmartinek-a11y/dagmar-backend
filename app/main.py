@@ -2,27 +2,38 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Protocol, cast
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 
+from app.api.integration_common import (
+    INTEGRATION_NAMESPACE,
+    IntegrationError,
+    ensure_request_id,
+    finalize_integration_audit,
+    get_audit_context,
+    integration_error_response,
+)
 from app.api.v1.admin_attendance import router as admin_attendance_router
 from app.api.v1.admin_auth import router as admin_auth_router
 from app.api.v1.admin_employments import router as admin_employments_router
 from app.api.v1.admin_export import router as admin_export_router
 from app.api.v1.admin_instances import router as admin_instances_router
+from app.api.v1.admin_integrations import router as admin_integrations_router
 from app.api.v1.admin_settings import router as admin_settings_router
 from app.api.v1.admin_shift_plan import router as admin_shift_plan_router
 from app.api.v1.admin_smtp import router as admin_smtp_router
 from app.api.v1.admin_users import router as admin_users_router
 from app.api.v1.attendance import router as attendance_router
+from app.api.v1.integration import router as integration_router
 from app.api.v1.portal_auth import router as portal_auth_router
 from app.api.v1.public_instances import router as public_instances_router
 from app.brand.brand import APP_NAME_LONG
@@ -131,14 +142,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def request_id_and_timing(request: Request, call_next):
         start_ms = _now_ms()
-        response = await call_next(request)
+        request.state.request_id = uuid.uuid4().hex
+        response: JSONResponse | None = None
+        is_integration = request.url.path.startswith(INTEGRATION_NAMESPACE)
+        try:
+            response = await call_next(request)
+        except IntegrationError as exc:
+            response = integration_error_response(request, exc.status_code, exc.code, exc.message)
+        except HTTPException as exc:
+            if is_integration:
+                get_audit_context(request).error_code = "invalid_request" if exc.status_code == 400 else "internal_error"
+                response = integration_error_response(
+                    request,
+                    exc.status_code,
+                    "invalid_request" if exc.status_code == 400 else "internal_error",
+                    str(exc.detail) if isinstance(exc.detail, str) else "Požadavek se nepodařilo zpracovat.",
+                )
+            else:
+                raise exc
+        except Exception:
+            if is_integration:
+                get_audit_context(request).error_code = "internal_error"
+                response = integration_error_response(
+                    request,
+                    500,
+                    "internal_error",
+                    "Došlo k interní chybě.",
+                )
+            else:
+                raise
         dur_ms = _now_ms() - start_ms
         response.headers["X-Request-Duration-Ms"] = str(dur_ms)
+        response.headers["X-Request-ID"] = ensure_request_id(request)
+        if is_integration:
+            session = get_sessionmaker()()
+            try:
+                finalize_integration_audit(session, request, status_code=response.status_code)
+            finally:
+                session.close()
         return response
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(request: Request, exc: RequestValidationError):
         if request.url.path.startswith("/api/"):
+            if request.url.path.startswith(INTEGRATION_NAMESPACE):
+                get_audit_context(request).error_code = "invalid_request"
+                return integration_error_response(request, 400, "invalid_request", "Neplatný požadavek.")
             return JSONResponse(
                 status_code=400,
                 content={
@@ -186,14 +235,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_settings_router, tags=["admin"])
     app.include_router(admin_users_router, tags=["admin"])
     app.include_router(admin_employments_router, tags=["admin"])
+    app.include_router(admin_integrations_router, tags=["admin"])
     app.include_router(admin_smtp_router, tags=["admin"])
     app.include_router(portal_auth_router, tags=["portal"])
+    app.include_router(integration_router, tags=["integration"])
 
     # Consistent JSON error for unhandled exceptions in API paths.
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         # Do not leak details to client.
         if request.url.path.startswith("/api/"):
+            if request.url.path.startswith(INTEGRATION_NAMESPACE):
+                get_audit_context(request).error_code = "internal_error"
+                return integration_error_response(request, 500, "internal_error", "Došlo k interní chybě.")
             return JSONResponse(
                 status_code=500,
                 content={"error": {"code": "internal_error", "message": "Internal server error"}},

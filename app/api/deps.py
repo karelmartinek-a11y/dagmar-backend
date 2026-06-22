@@ -7,8 +7,15 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.integration_common import (
+    IntegrationError,
+    get_audit_context,
+    get_source_ip,
+    init_integration_request,
+)
 from app.db import models
 from app.db.session import get_db
+from app.security.integration_tokens import touch_client_last_used, verify_integration_token
 from app.security.sessions import get_admin_session
 from app.security.tokens import verify_instance_token
 
@@ -22,6 +29,12 @@ class InstanceAuth:
 class PortalUserAuth:
     instance: models.Instance
     user: models.PortalUser
+
+
+@dataclass(frozen=True)
+class IntegrationAuth:
+    client: models.IntegrationClient
+    secret: models.IntegrationClientSecret
 
 
 def _bearer_from_auth_header(authorization: str | None) -> str | None:
@@ -94,4 +107,44 @@ def require_portal_user_auth(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="K tokenu neni prirazen uzivatel")
     return PortalUserAuth(instance=auth.instance, user=user)
+
+
+def require_integration_auth(
+    request: Request,
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None),
+) -> IntegrationAuth:
+    init_integration_request(request)
+    token = _bearer_from_auth_header(authorization)
+    if not token:
+        raise IntegrationError(
+            status.HTTP_401_UNAUTHORIZED,
+            "missing_token",
+            "Chybí přístupový token.",
+        )
+
+    auth = verify_integration_token(db, token, source_ip=get_source_ip(request))
+    if auth is None:
+        raise IntegrationError(
+            status.HTTP_401_UNAUTHORIZED,
+            "invalid_token",
+            "Přístupový token není platný.",
+        )
+
+    audit = get_audit_context(request)
+    audit.client_id = auth.client.id
+
+    if auth.client.status == models.IntegrationClientStatus.DISABLED.value:
+        raise IntegrationError(
+            status.HTTP_403_FORBIDDEN,
+            "client_disabled",
+            "Integrační klient je zakázaný.",
+        )
+
+    try:
+        touch_client_last_used(db, auth.client)
+    except Exception:
+        db.rollback()
+
+    return IntegrationAuth(client=auth.client, secret=auth.secret)
 
