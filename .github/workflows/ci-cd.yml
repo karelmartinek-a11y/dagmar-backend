@@ -88,7 +88,7 @@ jobs:
             # Pokud tam z minulosti zůstane .git, začne ukazovat historický HEAD,
             # i když je pracovní strom po rsync aktuální.
             rm -rf /opt/dagmar/backend/.git
-            rsync -a --no-owner --no-group --no-perms --delete --exclude='.git' --exclude='.venv' /srv/hcasc/_repos/dagmar-backend/ /opt/dagmar/backend/
+            rsync -a --no-owner --no-group --no-perms --delete --exclude='.git' --exclude='.venv' --exclude='__pycache__/' --exclude='*.pyc' /srv/hcasc/_repos/dagmar-backend/ /opt/dagmar/backend/
             if [ ! -d /opt/dagmar/backend/.venv ]; then
               python3 -m venv /opt/dagmar/backend/.venv
             fi
