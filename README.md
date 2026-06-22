@@ -53,10 +53,10 @@ export DAGMAR_DATABASE_URL="postgresql+psycopg://dagmar:dagmar@127.0.0.1:5433/da
 export DAGMAR_ADMIN_PASSWORD="change-me"
 export DAGMAR_SESSION_SECRET="change-me-session-secret"
 export DAGMAR_CSRF_SECRET="change-me-csrf-secret"
-export DAGMAR_ALLOWED_ORIGINS="https://dagmar.hcasc.cz"
+export DAGMAR_CORS_ALLOW_ORIGINS="https://dagmar.hcasc.cz"
 ```
 
-> `DAGMAR_ALLOWED_ORIGINS` se používá pro CORS (typicky jen vlastní doména v produkci).
+> `DAGMAR_CORS_ALLOW_ORIGINS` se používá pro CORS (typicky jen vlastní doména v produkci).
 
 ### 2.4 Migrace DB
 
