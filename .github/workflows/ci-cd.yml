@@ -83,10 +83,7 @@ jobs:
             git checkout main
             git reset --hard origin/main
             DEPLOY_TAG=$(git rev-parse --short HEAD)
-            TARGET_USER=$(id -un)
-            TARGET_GROUP=$(id -gn)
-            sudo mkdir -p /opt/dagmar/backend
-            sudo chown -R "$TARGET_USER:$TARGET_GROUP" /opt/dagmar/backend
+            mkdir -p /opt/dagmar/backend
             # /opt/dagmar/backend je deploy target, ne kanonický git checkout.
             # Pokud tam z minulosti zůstane .git, začne ukazovat historický HEAD,
             # i když je pracovní strom po rsync aktuální.
