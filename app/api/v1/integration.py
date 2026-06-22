@@ -1,8 +1,8 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
-from datetime import date
 from collections.abc import Sequence
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request, status

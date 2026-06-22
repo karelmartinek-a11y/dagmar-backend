@@ -37,6 +37,13 @@ class IntegrationAuthResult:
     secret: models.IntegrationClientSecret
 
 
+class IntegrationTokenError(Exception):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
@@ -142,11 +149,11 @@ def verify_integration_token(
         if not secret.token_hash or not verify_token(raw_token, secret.token_hash):
             continue
         if not _client_is_active(client):
-            return None
+            raise IntegrationTokenError("client_disabled", "Integrační klient je zakázaný.")
         if _client_is_expired(client):
-            return None
+            raise IntegrationTokenError("client_disabled", "Integrační klient expiroval.")
         if not _ip_allowed(client, source_ip):
-            return None
+            raise IntegrationTokenError("ip_forbidden", "Požadavek není povolen z této IP adresy.")
         return IntegrationAuthResult(client=client, secret=secret)
     return None
 

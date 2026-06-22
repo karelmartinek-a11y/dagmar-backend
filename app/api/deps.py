@@ -15,7 +15,11 @@ from app.api.integration_common import (
 )
 from app.db import models
 from app.db.session import get_db
-from app.security.integration_tokens import touch_client_last_used, verify_integration_token
+from app.security.integration_tokens import (
+    IntegrationTokenError,
+    touch_client_last_used,
+    verify_integration_token,
+)
 from app.security.sessions import get_admin_session
 from app.security.tokens import verify_instance_token
 
@@ -50,10 +54,6 @@ def _bearer_from_auth_header(authorization: str | None) -> str | None:
 
 
 def require_admin(request: Request):
-    """Require a valid admin session.
-
-    Session cookie is validated by app.security.sessions.
-    """
     sess = get_admin_session(request)
     if not sess or not sess.is_authenticated:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -65,10 +65,6 @@ def require_instance_auth(
     db: Session = Depends(get_db),
     authorization: str | None = Header(default=None),
 ) -> InstanceAuth:
-    """Require instance Bearer token.
-
-    Token is issued after admin activation, stored hashed in DB.
-    """
     token = _bearer_from_auth_header(authorization)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Bearer token")
@@ -80,7 +76,6 @@ def require_instance_auth(
     if instance.status != models.InstanceStatus.ACTIVE:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Instance not active")
 
-    # last_seen update is done in endpoints that are polled frequently (status/attendance)
     return InstanceAuth(instance=instance)
 
 
@@ -89,7 +84,6 @@ def require_instance(
     db: Session = Depends(get_db),
     authorization: str | None = Header(default=None),
 ) -> models.Instance:
-    """Backward-compatible alias returning the Instance directly."""
     return require_instance_auth(request=request, db=db, authorization=authorization).instance
 
 
@@ -123,7 +117,13 @@ def require_integration_auth(
             "Chybí přístupový token.",
         )
 
-    auth = verify_integration_token(db, token, source_ip=get_source_ip(request))
+    try:
+        auth = verify_integration_token(db, token, source_ip=get_source_ip(request))
+    except IntegrationTokenError as exc:
+        if exc.code == "ip_forbidden":
+            raise IntegrationError(status.HTTP_403_FORBIDDEN, exc.code, exc.message) from exc
+        raise IntegrationError(status.HTTP_403_FORBIDDEN, "client_disabled", exc.message) from exc
+
     if auth is None:
         raise IntegrationError(
             status.HTTP_401_UNAUTHORIZED,
@@ -134,17 +134,9 @@ def require_integration_auth(
     audit = get_audit_context(request)
     audit.client_id = auth.client.id
 
-    if auth.client.status == models.IntegrationClientStatus.DISABLED.value:
-        raise IntegrationError(
-            status.HTTP_403_FORBIDDEN,
-            "client_disabled",
-            "Integrační klient je zakázaný.",
-        )
-
     try:
         touch_client_last_used(db, auth.client)
     except Exception:
         db.rollback()
 
     return IntegrationAuth(client=auth.client, secret=auth.secret)
-
