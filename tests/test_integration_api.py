@@ -171,3 +171,31 @@ def test_integration_period_limit_is_enforced(tmp_path: Path) -> None:
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "period_too_large"
+
+
+def test_integration_openapi_contains_integration_paths(tmp_path: Path) -> None:
+    client, session_local = _build_client(tmp_path)
+    with session_local() as db:
+        token = _seed_domain_data(db)
+
+    response = client.get(
+        "/api/v1/integration/openapi.json",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    assert "/api/v1/integration/health" in paths
+    assert "/api/v1/integration/employments" in paths
+
+
+def test_missing_integration_route_uses_error_envelope(tmp_path: Path) -> None:
+    client, session_local = _build_client(tmp_path)
+    with session_local() as db:
+        token = _seed_domain_data(db)
+
+    response = client.get(
+        "/api/v1/integration/changes",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"

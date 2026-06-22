@@ -545,11 +545,10 @@ def integration_openapi(
 ) -> dict[str, Any]:
     request.state.integration_rate_key = f"client:{auth.client.id}"
     _ensure_scope(auth, "openapi:read")
-    routes = [route for route in request.app.routes if getattr(route, "path", "").startswith("/api/v1/integration")]
     schema = get_openapi(
         title="Dagmar Integration API",
         version="1.0.0",
-        routes=routes,
+        routes=router.routes,
         description="Read-only integrační API pro systém Dagmar.",
     )
     get_audit_context(request).row_count = len(schema.get("paths", {}))

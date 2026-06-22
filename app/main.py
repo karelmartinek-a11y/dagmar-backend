@@ -9,8 +9,10 @@ from threading import Event, Thread
 from typing import Any, Protocol, cast
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 
@@ -171,6 +173,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             else:
                 raise
+        if response is None:
+            raise RuntimeError("Middleware nevytvořila odpověď.")
         dur_ms = _now_ms() - start_ms
         response.headers["X-Request-Duration-Ms"] = str(dur_ms)
         response.headers["X-Request-ID"] = ensure_request_id(request)
@@ -199,6 +203,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 },
             )
         raise exc
+
+    @app.exception_handler(StarletteHTTPException)
+    async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+        if request.url.path.startswith(INTEGRATION_NAMESPACE):
+            if exc.status_code == 404:
+                get_audit_context(request).error_code = "not_found"
+                return integration_error_response(request, 404, "not_found", "Požadovaný zdroj nebyl nalezen.")
+            get_audit_context(request).error_code = "invalid_request" if exc.status_code == 400 else "internal_error"
+            return integration_error_response(
+                request,
+                exc.status_code,
+                "invalid_request" if exc.status_code == 400 else "internal_error",
+                str(exc.detail) if isinstance(exc.detail, str) else "Požadavek se nepodařilo zpracovat.",
+            )
+        return await http_exception_handler(request, HTTPException(status_code=exc.status_code, detail=exc.detail))
 
     async def _health_payload() -> dict[str, Any]:
         return {"ok": True}
