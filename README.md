@@ -176,6 +176,7 @@ Krátký seznam endpointů:
 - `/api/v1/integration/changes` v této etapě neexistuje, protože backend zatím nemá spolehlivý change log
 - list endpointy vrací `data` a `pagination`
 - `shift-plan`, `attendances` a `punches` vyžadují `date_from` a `date_to`, maximální období je 31 dní
+- detailní partnerská a interní správcovská dokumentace je v `docs/integration-api/`
 
 ## 5.2 Provozní správa integračních klientů
 
