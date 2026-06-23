@@ -1,37 +1,45 @@
 # KájovoDagmar docházkový systém — Backend (FastAPI)
 
-Backend pro KájovoDagmar docházkový systém.
+> **Archivní repozitář — zákaz dalších změn**
+>
+> Tento repozitář `dagmar-backend` už není aktivním vývojovým ani deploy zdrojem pro `dagmar.hcasc.cz`.
+> Aktivní repozitář je výhradně monorepo `karelmartinek-a11y/dagmar-monorepo`:
+> `https://github.com/karelmartinek-a11y/dagmar-monorepo`
+>
+> V tomto repozitáři je zakázáno provádět jakékoli další změny kódu, konfigurace, workflow, dokumentace i deploye.
+> Jakákoli změna provedená zde se nemá považovat za platnou změnu systému a nesmí se používat pro další vývoj.
+Backend pro KĂˇjovoDagmar dochĂˇzkovĂ˝ systĂ©m.
 
-- Kanonická doména: **dagmar.hcasc.cz**
+- KanonickĂˇ domĂ©na: **dagmar.hcasc.cz**
 - API base path: **/api/v1/**
-- Interní bind: **127.0.0.1:8101** (host-level)
-- Databáze: PostgreSQL v Dockeru, publikovaná pouze na **127.0.0.1:5433**
+- InternĂ­ bind: **127.0.0.1:8101** (host-level)
+- DatabĂˇze: PostgreSQL v Dockeru, publikovanĂˇ pouze na **127.0.0.1:5433**
 
 ---
 
-## 1) Co backend dělá
+## 1) Co backend dÄ›lĂˇ
 
 Backend implementuje:
 
-- portal přihlášení zaměstnance (e-mail + heslo) a vydání bearer tokenu
-- docházku (arrival/departure po dnech) s upsertem
-- externí integrační API pod `/api/v1/integration` s read endpointy a řízeným zápisem docházky
-- admin přihlášení přes **session cookie** + **CSRF** ochranu
+- portal pĹ™ihlĂˇĹˇenĂ­ zamÄ›stnance (e-mail + heslo) a vydĂˇnĂ­ bearer tokenu
+- dochĂˇzku (arrival/departure po dnech) s upsertem
+- externĂ­ integraÄŤnĂ­ API pod `/api/v1/integration` s read endpointy a Ĺ™Ă­zenĂ˝m zĂˇpisem dochĂˇzky
+- admin pĹ™ihlĂˇĹˇenĂ­ pĹ™es **session cookie** + **CSRF** ochranu
 - exporty:
-  - CSV pro konkrétní instanci a měsíc
-  - ZIP s více CSV pro všechny instance a měsíc
+  - CSV pro konkrĂ©tnĂ­ instanci a mÄ›sĂ­c
+  - ZIP s vĂ­ce CSV pro vĹˇechny instance a mÄ›sĂ­c
 - rate limiting pro admin login a API provoz
 
 ---
 
-## 2) Lokální spuštění (developer)
+## 2) LokĂˇlnĂ­ spuĹˇtÄ›nĂ­ (developer)
 
-### 2.1 Požadavky
+### 2.1 PoĹľadavky
 
 - Python 3.11+
-- běžící PostgreSQL (pro dev můžete použít lokální Postgres; pro produkci viz server instrukce)
+- bÄ›ĹľĂ­cĂ­ PostgreSQL (pro dev mĹŻĹľete pouĹľĂ­t lokĂˇlnĂ­ Postgres; pro produkci viz server instrukce)
 
-### 2.2 Vytvoření virtuálního prostředí
+### 2.2 VytvoĹ™enĂ­ virtuĂˇlnĂ­ho prostĹ™edĂ­
 
 ```bash
 cd /opt/dagmar/backend
@@ -43,9 +51,9 @@ pip install -e .
 
 ### 2.3 Konfigurace
 
-Backend načítá konfiguraci z env proměnných (v produkci z `/etc/dagmar/backend.env`).
+Backend naÄŤĂ­tĂˇ konfiguraci z env promÄ›nnĂ˝ch (v produkci z `/etc/dagmar/backend.env`).
 
-Pro lokální dev si můžete exportovat proměnné do shellu:
+Pro lokĂˇlnĂ­ dev si mĹŻĹľete exportovat promÄ›nnĂ© do shellu:
 
 ```bash
 export DAGMAR_DATABASE_URL="postgresql+psycopg://dagmar:dagmar@127.0.0.1:5433/dagmar"
@@ -55,7 +63,7 @@ export DAGMAR_CSRF_SECRET="change-me-csrf-secret"
 export DAGMAR_CORS_ALLOW_ORIGINS="https://dagmar.hcasc.cz"
 ```
 
-> `DAGMAR_CORS_ALLOW_ORIGINS` se používá pro CORS (typicky jen vlastní doména v produkci).
+> `DAGMAR_CORS_ALLOW_ORIGINS` se pouĹľĂ­vĂˇ pro CORS (typicky jen vlastnĂ­ domĂ©na v produkci).
 
 ### 2.4 Migrace DB
 
@@ -63,18 +71,18 @@ export DAGMAR_CORS_ALLOW_ORIGINS="https://dagmar.hcasc.cz"
 alembic upgrade head
 ```
 
-> Poznámka (PULS-009): Runtime DDL v request flow bylo odstraněno. Pokud chybí tabulky pro shift-plan, backend je už za běhu nevytváří; musí být připravené migracemi před startem aplikace.
+> PoznĂˇmka (PULS-009): Runtime DDL v request flow bylo odstranÄ›no. Pokud chybĂ­ tabulky pro shift-plan, backend je uĹľ za bÄ›hu nevytvĂˇĹ™Ă­; musĂ­ bĂ˝t pĹ™ipravenĂ© migracemi pĹ™ed startem aplikace.
 
 ### 2.5 Seed admin
 
-Pro vytvoření admin účtu použijte skript v rootu projektu:
+Pro vytvoĹ™enĂ­ admin ĂşÄŤtu pouĹľijte skript v rootu projektu:
 
 ```bash
 cd /opt/dagmar
 ./scripts/seed_admin.sh
 ```
 
-### 2.6 Spuštění serveru
+### 2.6 SpuĹˇtÄ›nĂ­ serveru
 
 Pro dev (uvicorn):
 
@@ -82,7 +90,7 @@ Pro dev (uvicorn):
 uvicorn app.main:app --host 127.0.0.1 --port 8101 --reload
 ```
 
-Pro produkci se používá gunicorn (viz `gunicorn.conf.py`):
+Pro produkci se pouĹľĂ­vĂˇ gunicorn (viz `gunicorn.conf.py`):
 
 ```bash
 gunicorn -c gunicorn.conf.py app.main:app
@@ -98,7 +106,7 @@ pip install -e .[dev]
 PYTHONPATH=. pytest
 ```
 
-Alternativně použijte helper skript:
+AlternativnÄ› pouĹľijte helper skript:
 
 ```bash
 ./scripts/test.sh
@@ -106,12 +114,12 @@ Alternativně použijte helper skript:
 
 ## 3) Healthcheck
 
-- `GET /api/v1/health` (kanonický endpoint)
-  - vrací `{ "ok": true }`.
-- `GET /api/health` (kompatibilní alias)
-  - vrací stejné `{ "ok": true }`.
+- `GET /api/v1/health` (kanonickĂ˝ endpoint)
+  - vracĂ­ `{ "ok": true }`.
+- `GET /api/health` (kompatibilnĂ­ alias)
+  - vracĂ­ stejnĂ© `{ "ok": true }`.
 
-Příklad:
+PĹ™Ă­klad:
 
 ```bash
 curl -sS http://127.0.0.1:8101/api/v1/health | jq
@@ -119,27 +127,27 @@ curl -sS http://127.0.0.1:8101/api/v1/health | jq
 
 ---
 
-## 4) Bezpečnostní model
+## 4) BezpeÄŤnostnĂ­ model
 
-### 4.1 Zaměstnanec (portal login)
+### 4.1 ZamÄ›stnanec (portal login)
 
-- zaměstnanec se přihlašuje přes portal endpoint (`/api/v1/portal/login`)
-- po ověření e-mailu a hesla backend vydá bearer token pro attendance API
+- zamÄ›stnanec se pĹ™ihlaĹˇuje pĹ™es portal endpoint (`/api/v1/portal/login`)
+- po ovÄ›Ĺ™enĂ­ e-mailu a hesla backend vydĂˇ bearer token pro attendance API
 
 ### 4.2 Admin
 
-- `POST /api/v1/admin/login` nastaví session cookie
-- admin identita je pevně `provoz@hotelchodovasc.cz`
-- pro admin akce je povinná validní session
-- pro state-changing requesty je povinná **CSRF** ochrana
+- `POST /api/v1/admin/login` nastavĂ­ session cookie
+- admin identita je pevnÄ› `provoz@hotelchodovasc.cz`
+- pro admin akce je povinnĂˇ validnĂ­ session
+- pro state-changing requesty je povinnĂˇ **CSRF** ochrana
 
 ---
 
-## 5) API přehled (odkaz)
+## 5) API pĹ™ehled (odkaz)
 
-Detailní kontrakt a příklady jsou v `api-contract.md`.
+DetailnĂ­ kontrakt a pĹ™Ă­klady jsou v `api-contract.md`.
 
-Krátký seznam endpointů:
+KrĂˇtkĂ˝ seznam endpointĹŻ:
 
 - Attendance:
   - `GET /api/v1/attendance?year=YYYY&month=MM`
@@ -168,21 +176,21 @@ Krátký seznam endpointů:
   - `GET /api/v1/integration/locks`
   - `GET /api/v1/integration/openapi.json`
 
-## 5.1 Integrační API
+## 5.1 IntegraÄŤnĂ­ API
 
-- autentizace je samostatným bearer tokenem ve formátu `Authorization: Bearer dgi_<token>`
-- integrační tokeny jsou oddělené od zaměstnaneckých `dg_` tokenů
-- `/api/v1/integration/punches` vrací pouze **odvozené průchody** z `attendance.arrival_time` a `attendance.departure_time`
-- `/api/v1/integration/changes` v této etapě neexistuje, protože backend zatím nemá spolehlivý change log
-- list endpointy vrací `data` a `pagination`
-- `shift-plan`, `attendances` a `punches` vyžadují `date_from` a `date_to`, maximální období je 31 dní
-- detailní partnerská a interní správcovská dokumentace je v `docs/integration-api/`
+- autentizace je samostatnĂ˝m bearer tokenem ve formĂˇtu `Authorization: Bearer dgi_<token>`
+- integraÄŤnĂ­ tokeny jsou oddÄ›lenĂ© od zamÄ›stnaneckĂ˝ch `dg_` tokenĹŻ
+- `/api/v1/integration/punches` vracĂ­ pouze **odvozenĂ© prĹŻchody** z `attendance.arrival_time` a `attendance.departure_time`
+- `/api/v1/integration/changes` v tĂ©to etapÄ› neexistuje, protoĹľe backend zatĂ­m nemĂˇ spolehlivĂ˝ change log
+- list endpointy vracĂ­ `data` a `pagination`
+- `shift-plan`, `attendances` a `punches` vyĹľadujĂ­ `date_from` a `date_to`, maximĂˇlnĂ­ obdobĂ­ je 31 dnĂ­
+- detailnĂ­ partnerskĂˇ a internĂ­ sprĂˇvcovskĂˇ dokumentace je v `docs/integration-api/`
 
-## 5.2 Provozní správa integračních klientů
+## 5.2 ProvoznĂ­ sprĂˇva integraÄŤnĂ­ch klientĹŻ
 
-Integrační klienty lze spravovat dvěma cestami:
+IntegraÄŤnĂ­ klienty lze spravovat dvÄ›ma cestami:
 
-- produkční admin sekcí `https://dagmar.hcasc.cz/admin/integrace`
+- produkÄŤnĂ­ admin sekcĂ­ `https://dagmar.hcasc.cz/admin/integrace`
 - fallback skriptem:
 
 ```bash
@@ -194,31 +202,31 @@ python scripts/manage_integrations.py enable 1
 python scripts/manage_integrations.py revoke 1
 ```
 
-Plaintext integrační token se zobrazuje pouze při vytvoření nebo rotaci. Do databáze se ukládá jen hash, fingerprint a `last4`.
+Plaintext integraÄŤnĂ­ token se zobrazuje pouze pĹ™i vytvoĹ™enĂ­ nebo rotaci. Do databĂˇze se uklĂˇdĂˇ jen hash, fingerprint a `last4`.
 
 ---
 
-## 6) Produkční poznámky
+## 6) ProdukÄŤnĂ­ poznĂˇmky
 
 - Bind pouze na loopback `127.0.0.1:8101`
-- Reverse proxy dělá Nginx (TLS terminace, security headers)
+- Reverse proxy dÄ›lĂˇ Nginx (TLS terminace, security headers)
 - Logy:
   - systemd journal: `journalctl -u dagmar-backend -f`
-  - případně souborové logy do `/var/log/dagmar/` dle konfigurace služby
+  - pĹ™Ă­padnÄ› souborovĂ© logy do `/var/log/dagmar/` dle konfigurace sluĹľby
 
 ---
 
-## 7) Časté problémy
+## 7) ÄŚastĂ© problĂ©my
 
 1. **502 Bad Gateway v Nginx**
-   - ověřte, že backend běží: `ss -lntp | grep 8101`
-   - ověřte log: `journalctl -u dagmar-backend -n 200 --no-pager`
+   - ovÄ›Ĺ™te, Ĺľe backend bÄ›ĹľĂ­: `ss -lntp | grep 8101`
+   - ovÄ›Ĺ™te log: `journalctl -u dagmar-backend -n 200 --no-pager`
 
-2. **Chyba DB připojení**
-   - ověřte, že DAGMAR DB container běží a port je jen na loopbacku:
+2. **Chyba DB pĹ™ipojenĂ­**
+   - ovÄ›Ĺ™te, Ĺľe DAGMAR DB container bÄ›ĹľĂ­ a port je jen na loopbacku:
      - `docker ps`
-     - `ss -lntp | grep 5433` (musí být `127.0.0.1:5433`)
+     - `ss -lntp | grep 5433` (musĂ­ bĂ˝t `127.0.0.1:5433`)
 
 3. **Admin login nefunguje (CSRF/session)**
-   - ověřte, že používáte HTTPS a cookie má `Secure`
-   - ověřte, že Nginx posílá správné `X-Forwarded-Proto https`
+   - ovÄ›Ĺ™te, Ĺľe pouĹľĂ­vĂˇte HTTPS a cookie mĂˇ `Secure`
+   - ovÄ›Ĺ™te, Ĺľe Nginx posĂ­lĂˇ sprĂˇvnĂ© `X-Forwarded-Proto https`
