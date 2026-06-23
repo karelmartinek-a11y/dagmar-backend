@@ -18,6 +18,9 @@ SCOPE_HEALTH = "integration:health"
 SCOPE_EMPLOYMENTS = "employments:read"
 SCOPE_SHIFT_PLAN = "shift_plan:read"
 SCOPE_ATTENDANCE = "attendance:read"
+SCOPE_ATTENDANCE_CREATE = "attendance:create"
+SCOPE_ATTENDANCE_UPDATE = "attendance:update"
+SCOPE_ATTENDANCE_DELETE = "attendance:delete"
 SCOPE_PUNCHES = "punches:read"
 SCOPE_LOCKS = "locks:read"
 SCOPE_OPENAPI = "openapi:read"
@@ -90,6 +93,30 @@ SCOPE_DEFINITIONS: tuple[ScopeDefinition, ...] = (
         data_access="Vrací skutečné příchody a odchody podle employment_id.",
         when_to_enable="Zapněte pro mzdy, reporting nebo přenos skutečně odpracované doby.",
         risk="Vyšší riziko. Partner získá citlivá provozní data o docházce.",
+    ),
+    ScopeDefinition(
+        id=SCOPE_ATTENDANCE_CREATE,
+        label="Vytváření docházky",
+        description="Umožní založit nový docházkový záznam pro existující employment_id a datum.",
+        data_access="Smí vytvořit pouze docházku. Nevytváří zaměstnance, uživatele ani úvazky.",
+        when_to_enable="Zapněte jen pokud externí systém skutečně zapisuje docházku a má jasný proces pro duplicitní pokusy.",
+        risk="Vysoké riziko. Partner může založit nový docházkový záznam v povoleném rozsahu.",
+    ),
+    ScopeDefinition(
+        id=SCOPE_ATTENDANCE_UPDATE,
+        label="Úprava docházky",
+        description="Umožní měnit časy existujícího docházkového záznamu v povoleném rozsahu.",
+        data_access="Smí upravovat pouze uložené časy docházky. Nemění zaměstnance, úvazky, plány služeb ani zámky.",
+        when_to_enable="Zapněte jen pokud partner potřebuje opravovat nebo doplňovat docházku a umí pracovat s konflikty změn.",
+        risk="Vysoké riziko. Partner může změnit existující docházkový záznam.",
+    ),
+    ScopeDefinition(
+        id=SCOPE_ATTENDANCE_DELETE,
+        label="Mazání docházky",
+        description="Umožní odstranit existující docházkový záznam v povoleném rozsahu.",
+        data_access="Smí mazat pouze docházku. Nemá oprávnění spravovat zaměstnance, úvazky, plány služeb ani zámky.",
+        when_to_enable="Zapněte jen pokud je mazání nezbytné a partner má řízený auditovaný proces oprav.",
+        risk="Kritické riziko. Partner může smazat docházkový záznam; používejte pouze po výslovném schválení správce.",
     ),
     ScopeDefinition(
         id=SCOPE_PUNCHES,

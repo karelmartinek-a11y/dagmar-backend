@@ -33,6 +33,13 @@ class IntegrationAuditContext:
     client_id: int | None = None
     error_code: str | None = None
     row_count: int | None = None
+    operation: str | None = None
+    attendance_id: int | None = None
+    employment_id: int | None = None
+    attendance_date: date | None = None
+    expected_updated_at: datetime | None = None
+    before_state: dict[str, Any] | None = None
+    after_state: dict[str, Any] | None = None
 
 
 def ensure_request_id(request: Request) -> str:
@@ -90,6 +97,27 @@ def init_integration_request(request: Request) -> None:
     get_audit_context(request)
 
 
+def set_attendance_write_audit(
+    request: Request,
+    *,
+    operation: str,
+    attendance_id: int | None = None,
+    employment_id: int | None = None,
+    attendance_date: date | None = None,
+    expected_updated_at: datetime | None = None,
+    before_state: dict[str, Any] | None = None,
+    after_state: dict[str, Any] | None = None,
+) -> None:
+    ctx = get_audit_context(request)
+    ctx.operation = operation
+    ctx.attendance_id = attendance_id
+    ctx.employment_id = employment_id
+    ctx.attendance_date = attendance_date
+    ctx.expected_updated_at = expected_updated_at
+    ctx.before_state = before_state
+    ctx.after_state = after_state
+
+
 def finalize_integration_audit(
     db: Session,
     request: Request,
@@ -110,6 +138,13 @@ def finalize_integration_audit(
         error_code=ctx.error_code,
         row_count=ctx.row_count,
         duration_ms=duration_ms,
+        operation=ctx.operation,
+        attendance_id=ctx.attendance_id,
+        employment_id=ctx.employment_id,
+        attendance_date=ctx.attendance_date,
+        expected_updated_at=ctx.expected_updated_at,
+        before_state=ctx.before_state,
+        after_state=ctx.after_state,
     )
     db.add(log_row)
     db.commit()
@@ -147,4 +182,3 @@ def utc_isoformat(value: datetime | None) -> str | None:
         return None
     as_utc = value.astimezone(UTC)
     return as_utc.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-

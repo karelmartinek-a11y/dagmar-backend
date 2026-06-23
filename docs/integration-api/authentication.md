@@ -2,7 +2,7 @@
 
 ## Účel tokenu
 
-Integrační API používá samostatný bearer token určený pouze pro externí read-only integrace.
+Integrační API používá samostatný bearer token určený pro externí integrace s read endpointy a volitelně i se zápisem docházky podle přidělených scopes.
 
 Tento token je oddělený od:
 
@@ -57,6 +57,9 @@ Aktuálně implementované scopes:
 | `employments:read` | Čtení seznamu úvazků přes `GET /employments`. |
 | `shift_plan:read` | Čtení plánu směn přes `GET /shift-plan`. |
 | `attendance:read` | Čtení denní docházky přes `GET /attendances`. |
+| `attendance:create` | Vytvoření docházky přes `POST /attendances`. |
+| `attendance:update` | Částečná úprava docházky přes `PATCH /attendances/{attendance_id}`. |
+| `attendance:delete` | Smazání docházky přes `DELETE /attendances/{attendance_id}`. |
 | `punches:read` | Čtení odvozených průchodů přes `GET /punches`. |
 | `locks:read` | Čtení měsíčních zámků přes `GET /locks`. |
 | `openapi:read` | Přístup na chráněný `GET /openapi.json`. |

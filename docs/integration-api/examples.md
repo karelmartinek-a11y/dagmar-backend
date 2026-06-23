@@ -15,52 +15,12 @@ curl -sS \
   "ok": true,
   "service": "dagmar-integration-api",
   "api_version": "v1",
-  "contract_version": "2026-06-22",
+  "contract_version": "2026-06-23",
   "timezone": "Europe/Prague"
 }
 ```
 
-## 2. Úvazky
-
-```bash
-curl -sS \
-  -H "Authorization: Bearer dgi_REPLACE_WITH_TOKEN" \
-  "https://dagmar.hcasc.cz/api/v1/integration/employments?active=true&limit=100"
-```
-
-```json
-{
-  "data": [
-    {
-      "employment_id": 101,
-      "employee_id": 2201,
-      "display_label": "Jan Partner - DPP/DPČ - Recepce",
-      "title": "Recepce",
-      "employment_type": "DPP_DPC",
-      "start_date": "2026-06-01",
-      "end_date": null,
-      "is_active": true,
-      "last_changed_at": "2026-06-22T22:28:47Z",
-      "cursor_key": 101
-    }
-  ],
-  "pagination": {
-    "limit": 100,
-    "next_cursor": null,
-    "has_more": false
-  }
-}
-```
-
-## 3. Plán směn za krátké období
-
-```bash
-curl -sS \
-  -H "Authorization: Bearer dgi_REPLACE_WITH_TOKEN" \
-  "https://dagmar.hcasc.cz/api/v1/integration/shift-plan?date_from=2026-06-10&date_to=2026-06-16&include_locks=true"
-```
-
-## 4. Docházka za krátké období
+## 2. Čtení docházky
 
 ```bash
 curl -sS \
@@ -68,94 +28,69 @@ curl -sS \
   "https://dagmar.hcasc.cz/api/v1/integration/attendances?date_from=2026-06-10&date_to=2026-06-16&include_plan=true&include_locks=true&include_punches=true"
 ```
 
-## 5. Odvozené průchody za krátké období
+## 3. Vytvoření docházky
 
 ```bash
 curl -sS \
+  -X POST \
   -H "Authorization: Bearer dgi_REPLACE_WITH_TOKEN" \
-  "https://dagmar.hcasc.cz/api/v1/integration/punches?date_from=2026-06-10&date_to=2026-06-16"
+  -H "Content-Type: application/json" \
+  -d '{
+    "employment_id": 101,
+    "date": "2026-06-12",
+    "arrival_time": "08:00",
+    "departure_time": "16:30"
+  }' \
+  https://dagmar.hcasc.cz/api/v1/integration/attendances
 ```
 
-```json
-{
-  "data": [
-    {
-      "attendance_id": 8801,
-      "employment_id": 101,
-      "employee_id": 2201,
-      "date": "2026-06-10",
-      "source": "derived_from_attendance",
-      "raw_event_available": false,
-      "event_type": "ARRIVAL",
-      "event_time": "08:03",
-      "cursor_key": "2026-06-10:101:ARRIVAL:8801"
-    }
-  ],
-  "pagination": {
-    "limit": 100,
-    "next_cursor": null,
-    "has_more": false
-  }
-}
-```
-
-## 6. Zámky
+## 4. Úprava docházky
 
 ```bash
 curl -sS \
+  -X PATCH \
   -H "Authorization: Bearer dgi_REPLACE_WITH_TOKEN" \
-  "https://dagmar.hcasc.cz/api/v1/integration/locks?year=2026&month=6"
+  -H "Content-Type: application/json" \
+  -d '{
+    "departure_time": "16:45",
+    "expected_updated_at": "2026-06-23T09:14:00Z"
+  }' \
+  https://dagmar.hcasc.cz/api/v1/integration/attendances/501
 ```
 
-## 7. Stránkování s cursor
-
-První stránka:
+## 5. Mazání docházky
 
 ```bash
 curl -sS \
+  -X DELETE \
   -H "Authorization: Bearer dgi_REPLACE_WITH_TOKEN" \
-  "https://dagmar.hcasc.cz/api/v1/integration/employments?limit=1"
+  -H "Content-Type: application/json" \
+  -d '{
+    "expected_updated_at": "2026-06-23T09:14:00Z"
+  }' \
+  https://dagmar.hcasc.cz/api/v1/integration/attendances/501
 ```
 
-Další stránka s opaque `cursor`:
-
-```bash
-curl -sS \
-  -H "Authorization: Bearer dgi_REPLACE_WITH_TOKEN" \
-  "https://dagmar.hcasc.cz/api/v1/integration/employments?limit=1&cursor=eyJjdXJzb3Jfa2V5IjoxMDF9"
-```
-
-## 8. Typická chyba bez tokenu
-
-```bash
-curl -sS \
-  https://dagmar.hcasc.cz/api/v1/integration/health
-```
+## 6. Typická chyba při duplicitním vytvoření
 
 ```json
 {
   "error": {
-    "code": "missing_token",
-    "message": "Chybí přístupový token.",
-    "request_id": "0f86d61ffe3d448d91981d8cb373e766"
-  }
-}
-```
-
-## 9. Typická chyba při překročení období
-
-```bash
-curl -sS \
-  -H "Authorization: Bearer dgi_REPLACE_WITH_TOKEN" \
-  "https://dagmar.hcasc.cz/api/v1/integration/attendances?date_from=2026-06-01&date_to=2026-07-15"
-```
-
-```json
-{
-  "error": {
-    "code": "period_too_large",
-    "message": "Požadované období je příliš velké.",
+    "code": "duplicate_attendance",
+    "message": "Docházka pro zadaný úvazek a datum už existuje.",
     "request_id": "7e579de5332842679effbbb2d026ff72"
+  }
+}
+```
+
+## 7. Typická chyba při zamčeném období
+
+```json
+{
+  "error": {
+    "code": "attendance_locked",
+    "message": "Docházka za zvolené období je uzamčena.",
+    "request_id": "0f86d61ffe3d448d91981d8cb373e766"
   }
 }
 ```

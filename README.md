@@ -15,7 +15,7 @@ Backend implementuje:
 
 - portal přihlášení zaměstnance (e-mail + heslo) a vydání bearer tokenu
 - docházku (arrival/departure po dnech) s upsertem
-- externí read-only integrační API pod `/api/v1/integration`
+- externí integrační API pod `/api/v1/integration` s read endpointy a řízeným zápisem docházky
 - admin přihlášení přes **session cookie** + **CSRF** ochranu
 - exporty:
   - CSV pro konkrétní instanci a měsíc

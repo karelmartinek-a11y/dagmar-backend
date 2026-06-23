@@ -116,6 +116,9 @@ def test_admin_integration_options_and_create_flow(tmp_path: Path) -> None:
     assert options.status_code == 200
     payload = options.json()
     assert any(item["id"] == "integration:health" for item in payload["scopes"])
+    assert any(item["id"] == "attendance:create" for item in payload["scopes"])
+    assert any(item["id"] == "attendance:update" for item in payload["scopes"])
+    assert any(item["id"] == "attendance:delete" for item in payload["scopes"])
     assert any(item["id"] == "SELECTED_EMPLOYMENTS" for item in payload["data_scope_modes"])
 
     create_response = client.post(

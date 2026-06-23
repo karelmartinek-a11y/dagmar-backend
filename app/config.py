@@ -108,7 +108,7 @@ class Settings(BaseModel):
     # --- Logging ---
     log_level: str = Field(default="INFO")
     disable_docs: bool = Field(default=True)
-    integration_contract_version: str = Field(default="2026-06-22")
+    integration_contract_version: str = Field(default="2026-06-23")
 
     # --- Deploy metadata ---
     deploy_tag: str = Field(
@@ -229,7 +229,7 @@ def get_settings(env_file: str = "/etc/dagmar/backend.env") -> Settings:
         integration_token_length=int(os.getenv("DAGMAR_INTEGRATION_TOKEN_LENGTH", "48")),
         log_level=os.getenv("DAGMAR_LOG_LEVEL", "INFO"),
         disable_docs=os.getenv("DAGMAR_DISABLE_DOCS", "true").lower() == "true",
-        integration_contract_version=os.getenv("DAGMAR_INTEGRATION_CONTRACT_VERSION", "2026-06-22"),
+        integration_contract_version=os.getenv("DAGMAR_INTEGRATION_CONTRACT_VERSION", "2026-06-23"),
         deploy_tag=os.getenv(
             "DAGMAR_DEPLOY_TAG",
             _format_deploy_tag(datetime.now(UTC)),

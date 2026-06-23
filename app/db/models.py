@@ -466,6 +466,13 @@ class IntegrationAuditLog(Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    operation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    attendance_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    employment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attendance_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    expected_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    before_state: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    after_state: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
 
     client: Mapped[IntegrationClient | None] = relationship("IntegrationClient", back_populates="audit_logs")
 

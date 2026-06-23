@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Body, Depends, Query, Request, status
 from fastapi.openapi.utils import get_openapi
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import IntegrationAuth, require_integration_auth
@@ -18,6 +19,7 @@ from app.api.integration_common import (
     get_audit_context,
     parse_iso_date,
     raise_integration_error,
+    set_attendance_write_audit,
     utc_isoformat,
 )
 from app.config import Settings, get_settings
@@ -31,6 +33,7 @@ from app.services.integration_admin import (
     DATA_SCOPE_SELECTED_EMPLOYMENTS,
     infer_data_scope_mode,
 )
+from app.utils.timeparse import parse_hhmm_or_none
 
 router = APIRouter(prefix="/api/v1/integration", tags=["integration"])
 
@@ -49,6 +52,39 @@ class PaginationOut(BaseModel):
 class ListResponse(BaseModel):
     data: list[dict[str, Any]]
     pagination: PaginationOut
+
+
+class IntegrationAttendanceWriteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    arrival_time: str | None = Field(default=None, description="HH:MM nebo null")
+    departure_time: str | None = Field(default=None, description="HH:MM nebo null")
+
+
+class IntegrationAttendanceCreateIn(IntegrationAttendanceWriteIn):
+    employment_id: int = Field(..., ge=1)
+    date: str = Field(..., description="YYYY-MM-DD")
+
+
+class IntegrationAttendancePatchIn(IntegrationAttendanceWriteIn):
+    expected_updated_at: str | None = Field(default=None, description="UTC timestamp ve formátu ISO 8601")
+
+
+class IntegrationAttendanceDeleteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_updated_at: str | None = Field(default=None, description="UTC timestamp ve formátu ISO 8601")
+
+
+class IntegrationAttendanceMutationOut(BaseModel):
+    attendance_id: int
+    employment_id: int
+    employee_id: int | None = None
+    date: str
+    arrival_time: str | None = None
+    departure_time: str | None = None
+    last_changed_at: str | None = None
+    deleted: bool = False
 
 
 def _normalize_limit(limit: int) -> int:
@@ -197,6 +233,136 @@ def _load_lock_map(
         .where((models.AttendanceLock.year * 100 + models.AttendanceLock.month) <= (end.year * 100 + end.month))
     ).scalars().all()
     return {(row.employment_id, row.year, row.month): row for row in rows}
+
+
+def _parse_expected_updated_at(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        raise_integration_error(
+            status.HTTP_400_BAD_REQUEST,
+            "validation_error",
+            "Pole expected_updated_at musí být platné datum a čas v ISO 8601.",
+        )
+    if parsed.tzinfo is None:
+        raise_integration_error(
+            status.HTTP_400_BAD_REQUEST,
+            "validation_error",
+            "Pole expected_updated_at musí obsahovat časové pásmo.",
+        )
+    return parsed.astimezone(UTC)
+
+
+def _parse_attendance_times(*, arrival_time: str | None, departure_time: str | None) -> tuple[str | None, str | None]:
+    try:
+        return (parse_hhmm_or_none(arrival_time), parse_hhmm_or_none(departure_time))
+    except ValueError as exc:
+        raise_integration_error(status.HTTP_400_BAD_REQUEST, "validation_error", str(exc))
+        raise AssertionError from exc
+
+
+def _attendance_state(row: models.Attendance | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "arrival_time": row.arrival_time,
+        "departure_time": row.departure_time,
+        "last_changed_at": utc_isoformat(row.updated_at),
+    }
+
+
+def _serialize_attendance_mutation(row: models.Attendance, *, deleted: bool = False) -> dict[str, Any]:
+    employee_id = row.employment.user_id if row.employment is not None else None
+    return {
+        "attendance_id": row.id,
+        "employment_id": row.employment_id,
+        "employee_id": employee_id,
+        "date": row.date.isoformat(),
+        "arrival_time": row.arrival_time,
+        "departure_time": row.departure_time,
+        "last_changed_at": utc_isoformat(row.updated_at),
+        "deleted": deleted,
+    }
+
+
+def _get_employment_for_write(db: Session, *, employment_id: int) -> models.Employment:
+    employment = (
+        db.execute(
+            select(models.Employment)
+            .options(joinedload(models.Employment.user))
+            .where(models.Employment.id == employment_id)
+        )
+        .scalars()
+        .first()
+    )
+    if employment is None:
+        raise_integration_error(status.HTTP_404_NOT_FOUND, "not_found", "Požadovaný úvazek nebyl nalezen.")
+    assert employment is not None
+    return employment
+
+
+def _get_attendance_for_write(db: Session, *, attendance_id: int) -> models.Attendance:
+    row = (
+        db.execute(
+            select(models.Attendance)
+            .options(joinedload(models.Attendance.employment).joinedload(models.Employment.user))
+            .where(models.Attendance.id == attendance_id)
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        raise_integration_error(status.HTTP_404_NOT_FOUND, "not_found", "Docházkový záznam nebyl nalezen.")
+    assert row is not None
+    return row
+
+
+def _ensure_attendance_in_employment_period(employment: models.Employment, *, day: date) -> None:
+    if day < employment.start_date or (employment.end_date is not None and day > employment.end_date):
+        raise_integration_error(
+            status.HTTP_409_CONFLICT,
+            "conflict",
+            "Datum neleží v období platnosti vybraného úvazku.",
+        )
+
+
+def _ensure_attendance_month_not_locked(db: Session, *, employment_id: int, day: date) -> None:
+    lock = db.execute(
+        select(models.AttendanceLock).where(
+            models.AttendanceLock.employment_id == employment_id,
+            models.AttendanceLock.year == day.year,
+            models.AttendanceLock.month == day.month,
+        )
+    ).scalar_one_or_none()
+    if lock is not None:
+        raise_integration_error(
+            status.HTTP_409_CONFLICT,
+            "attendance_locked",
+            "Docházka za zvolené období je uzamčena.",
+        )
+
+
+def _ensure_expected_updated_at(
+    row: models.Attendance,
+    *,
+    expected_updated_at: datetime | None,
+) -> None:
+    if expected_updated_at is None:
+        return
+    current = row.updated_at.astimezone(UTC)
+    if current.replace(microsecond=0) != expected_updated_at.replace(microsecond=0):
+        raise_integration_error(
+            status.HTTP_409_CONFLICT,
+            "conflict",
+            "Docházkový záznam byl mezitím změněn.",
+        )
 
 
 @router.get("/health")
@@ -424,6 +590,181 @@ def integration_attendances(
         last_seen = str(cursor_value.get("cursor_key", ""))
         payload = [row for row in payload if str(row["cursor_key"]) > last_seen]
     return _paginate_records(request=request, records=payload, limit=limit, cursor_key="cursor_key")
+
+
+@router.post("/attendances", response_model=IntegrationAttendanceMutationOut, status_code=status.HTTP_201_CREATED)
+def create_integration_attendance(
+    payload: IntegrationAttendanceCreateIn,
+    request: Request,
+    auth: IntegrationAuth = Depends(require_integration_auth),
+    _limit_guard: None = Depends(rate_limit_dependency("integration-data", 120)),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    request.state.integration_rate_key = f"client:{auth.client.id}"
+    _ensure_scope(auth, "attendance:create")
+    day = parse_iso_date(payload.date, field_name="date")
+    set_attendance_write_audit(
+        request,
+        operation="attendance:create",
+        employment_id=payload.employment_id,
+        attendance_date=day,
+    )
+    _check_requested_scope(auth=auth, db=db, employment_id=payload.employment_id, employee_id=None)
+    employment = _get_employment_for_write(db, employment_id=payload.employment_id)
+    _ensure_attendance_in_employment_period(employment, day=day)
+    _ensure_attendance_month_not_locked(db, employment_id=employment.id, day=day)
+    arrival_time, departure_time = _parse_attendance_times(
+        arrival_time=payload.arrival_time,
+        departure_time=payload.departure_time,
+    )
+
+    existing = db.execute(
+        select(models.Attendance).where(
+            models.Attendance.employment_id == employment.id,
+            models.Attendance.date == day,
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        set_attendance_write_audit(
+            request,
+            operation="attendance:create",
+            attendance_id=existing.id,
+            employment_id=existing.employment_id,
+            attendance_date=existing.date,
+            before_state=_attendance_state(existing),
+        )
+        raise_integration_error(
+            status.HTTP_409_CONFLICT,
+            "duplicate_attendance",
+            "Docházka pro zadaný úvazek a datum už existuje.",
+        )
+
+    row = models.Attendance(
+        employment_id=employment.id,
+        instance_id=employment.user.instance_id if employment.user is not None else None,
+        date=day,
+        arrival_time=arrival_time,
+        departure_time=departure_time,
+    )
+    row.employment = employment
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise_integration_error(
+            status.HTTP_409_CONFLICT,
+            "duplicate_attendance",
+            "Docházka pro zadaný úvazek a datum už existuje.",
+        )
+    db.refresh(row)
+    set_attendance_write_audit(
+        request,
+        operation="attendance:create",
+        attendance_id=row.id,
+        employment_id=row.employment_id,
+        attendance_date=row.date,
+        after_state=_attendance_state(row),
+    )
+    get_audit_context(request).row_count = 1
+    return _serialize_attendance_mutation(row)
+
+
+@router.patch("/attendances/{attendance_id}", response_model=IntegrationAttendanceMutationOut)
+def patch_integration_attendance(
+    attendance_id: int,
+    payload: IntegrationAttendancePatchIn,
+    request: Request,
+    auth: IntegrationAuth = Depends(require_integration_auth),
+    _limit_guard: None = Depends(rate_limit_dependency("integration-data", 120)),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    request.state.integration_rate_key = f"client:{auth.client.id}"
+    _ensure_scope(auth, "attendance:update")
+    fields_to_update = {"arrival_time", "departure_time"} & set(payload.model_fields_set)
+    if not fields_to_update:
+        raise_integration_error(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid_attendance_payload",
+            "Payload musí obsahovat alespoň jedno zapisovatelné pole docházky.",
+        )
+    expected_updated_at = _parse_expected_updated_at(payload.expected_updated_at)
+    set_attendance_write_audit(
+        request,
+        operation="attendance:update",
+        attendance_id=attendance_id,
+        expected_updated_at=expected_updated_at,
+    )
+    row = _get_attendance_for_write(db, attendance_id=attendance_id)
+    employee_id = row.employment.user_id if row.employment is not None else None
+    _check_requested_scope(auth=auth, db=db, employment_id=row.employment_id, employee_id=employee_id)
+    _ensure_attendance_month_not_locked(db, employment_id=row.employment_id, day=row.date)
+    _ensure_expected_updated_at(row, expected_updated_at=expected_updated_at)
+    arrival_time, departure_time = _parse_attendance_times(
+        arrival_time=payload.arrival_time,
+        departure_time=payload.departure_time,
+    )
+    before_state = _attendance_state(row)
+    if "arrival_time" in fields_to_update:
+        row.arrival_time = arrival_time
+    if "departure_time" in fields_to_update:
+        row.departure_time = departure_time
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    set_attendance_write_audit(
+        request,
+        operation="attendance:update",
+        attendance_id=row.id,
+        employment_id=row.employment_id,
+        attendance_date=row.date,
+        expected_updated_at=expected_updated_at,
+        before_state=before_state,
+        after_state=_attendance_state(row),
+    )
+    get_audit_context(request).row_count = 1
+    return _serialize_attendance_mutation(row)
+
+
+@router.delete("/attendances/{attendance_id}", response_model=IntegrationAttendanceMutationOut)
+def delete_integration_attendance(
+    attendance_id: int,
+    request: Request,
+    payload: IntegrationAttendanceDeleteIn | None = Body(default=None),
+    auth: IntegrationAuth = Depends(require_integration_auth),
+    _limit_guard: None = Depends(rate_limit_dependency("integration-data", 120)),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    request.state.integration_rate_key = f"client:{auth.client.id}"
+    _ensure_scope(auth, "attendance:delete")
+    expected_updated_at = _parse_expected_updated_at(payload.expected_updated_at if payload is not None else None)
+    set_attendance_write_audit(
+        request,
+        operation="attendance:delete",
+        attendance_id=attendance_id,
+        expected_updated_at=expected_updated_at,
+    )
+    row = _get_attendance_for_write(db, attendance_id=attendance_id)
+    employee_id = row.employment.user_id if row.employment is not None else None
+    _check_requested_scope(auth=auth, db=db, employment_id=row.employment_id, employee_id=employee_id)
+    _ensure_attendance_month_not_locked(db, employment_id=row.employment_id, day=row.date)
+    _ensure_expected_updated_at(row, expected_updated_at=expected_updated_at)
+    before_state = _attendance_state(row)
+    response_payload = _serialize_attendance_mutation(row, deleted=True)
+    set_attendance_write_audit(
+        request,
+        operation="attendance:delete",
+        attendance_id=row.id,
+        employment_id=row.employment_id,
+        attendance_date=row.date,
+        expected_updated_at=expected_updated_at,
+        before_state=before_state,
+        after_state={"deleted": True},
+    )
+    db.delete(row)
+    db.commit()
+    get_audit_context(request).row_count = 1
+    return response_payload
 
 
 @router.get("/punches", response_model=ListResponse)
